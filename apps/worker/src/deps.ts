@@ -75,6 +75,11 @@ export interface Deps {
   orderControl?: EntryOrderControl | null;
   /** Returns the inference router for an agent. Throws when no decision key is configured. */
   routerFor(agent: Agent): ZeroGRouter;
+  /**
+   * Inference router for one agent: its own capped 0G key when one is stored, else the platform router.
+   * The tick uses this when it is set. Omitted in tests, where routerFor is used directly.
+   */
+  agentRouterFor?(agent: Agent): Promise<ZeroGRouter>;
   /** Ids for episodes, requests and orders. Defaults to randomUUID. */
   newId?: () => string;
 }

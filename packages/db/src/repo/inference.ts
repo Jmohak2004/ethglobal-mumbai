@@ -1,4 +1,4 @@
-import { and, eq, gte, sql } from "drizzle-orm";
+import { and, desc, eq, gte, isNotNull, sql } from "drizzle-orm";
 import type { InferenceTrace } from "@arena/shared";
 import type { Db } from "../client.ts";
 import { inferenceCalls, zgKeys } from "../schema.ts";
@@ -51,9 +51,11 @@ export interface ZgKeyRecord {
   creditLimit: number;
   resetPeriod: string;
   createdAt: number;
+  /** AES-256-GCM ciphertext of the sk- secret, produced by the worker. Never the plaintext key. */
+  encryptedSecret?: string | null;
 }
 
-/** Stores a minted 0G key's public metadata. The sk- secret must never be passed here. */
+/** Stores a minted 0G key. Pass only the encrypted secret; the plaintext sk- key must never reach the repo. */
 export async function insertZgKey(db: Db, key: ZgKeyRecord): Promise<void> {
   await db
     .insert(zgKeys)
@@ -63,8 +65,21 @@ export async function insertZgKey(db: Db, key: ZgKeyRecord): Promise<void> {
       creditLimit: key.creditLimit,
       resetPeriod: key.resetPeriod,
       createdAt: key.createdAt,
+      encryptedSecret: key.encryptedSecret ?? null,
     })
     .onConflictDoNothing({ target: zgKeys.keyId });
+}
+
+/** The agent's most recent key that has a stored secret, or null. */
+export async function getZgKeySecret(db: Db, agentId: string): Promise<{ keyId: string; encryptedSecret: string } | null> {
+  const [row] = await db
+    .select({ keyId: zgKeys.keyId, encryptedSecret: zgKeys.encryptedSecret })
+    .from(zgKeys)
+    .where(and(eq(zgKeys.agentId, agentId), isNotNull(zgKeys.encryptedSecret)))
+    .orderBy(desc(zgKeys.createdAt))
+    .limit(1);
+  if (!row || row.encryptedSecret === null) return null;
+  return { keyId: row.keyId, encryptedSecret: row.encryptedSecret };
 }
 
 export async function listZgKeys(db: Db, agentId: string): Promise<ZgKeyRecord[]> {

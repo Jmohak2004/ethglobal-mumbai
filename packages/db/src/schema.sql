@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS agents (
 );
 CREATE INDEX IF NOT EXISTS agents_owner_idx ON agents (owner_address);
 CREATE INDEX IF NOT EXISTS agents_template_idx ON agents (template);
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS provisioning JSONB NOT NULL DEFAULT '{}'::jsonb;
 
 CREATE TABLE IF NOT EXISTS agent_config_versions (
   agent_id TEXT NOT NULL REFERENCES agents (id),
@@ -159,6 +160,7 @@ CREATE TABLE IF NOT EXISTS zg_keys (
   created_at BIGINT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS zg_keys_agent_idx ON zg_keys (agent_id);
+ALTER TABLE zg_keys ADD COLUMN IF NOT EXISTS encrypted_secret TEXT;
 
 CREATE TABLE IF NOT EXISTS topups (
   id TEXT PRIMARY KEY,

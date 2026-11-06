@@ -3,7 +3,7 @@
 // The LLM can only ever reach the venue through evaluate(). runTick never throws: every failure is
 // recorded on the episode, and the returned TickResult says what happened.
 
-import { latestInsightDigest, newId, topForAgent, type Db, type InsertForecastInput } from "@arena/db";
+import { isPlaceholderWallet, latestInsightDigest, newId, topForAgent, type Db, type InsertForecastInput } from "@arena/db";
 import { evaluate, TEMPLATES } from "@arena/policy";
 import type {
   Agent,
@@ -38,7 +38,10 @@ export interface TickResult {
   agentId: string;
   requestId: string;
   episode: Episode | null;
-  /** Set when the tick did not run (agent not active). No episode is written. */
+  /**
+   * Set when the tick did not run: "agent is <status>" (no episode written), or "not provisioned"
+   * (a noop episode is written so the skip shows on the agent's timeline).
+   */
   skipped: string | null;
   orderId: string | null;
   /** Mode the order was sent in. Null when no order was attempted. */
@@ -52,6 +55,11 @@ export interface TickResult {
 
 const msg = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 const hold = (...reasons: string[]): PolicyVerdict => ({ kind: "noop", reasons });
+
+/** True once the agent has a trading wallet. Agents without one (the zero address) do not trade. */
+export function isTradingWalletProvisioned(agent: Pick<Agent, "tradingWallet">): boolean {
+  return !isPlaceholderWallet(agent.tradingWallet);
+}
 
 /**
  * The newest insight digest per configured asset for this agent, shaped for decide(). Returns undefined when
@@ -111,6 +119,30 @@ export async function runTick(deps: Deps, agent: Agent): Promise<TickResult> {
     }
 
     const now = deps.clock.now();
+    if (!isTradingWalletProvisioned(agent)) {
+      result.skipped = "not provisioned";
+      log.info("tick skipped", { reason: result.skipped });
+      const risk = await deps.risk.current().catch(() => "NORMAL" as const);
+      const episode: Episode = {
+        id: episodeId,
+        agentId: agent.id,
+        ts: now,
+        riskLevel: risk,
+        budgetTier: "healthy",
+        market: [],
+        decision: null,
+        inference: null,
+        verdict: hold("not provisioned"),
+        flashOrderIds: [],
+        zgStorageRoot: null,
+        error: null,
+      };
+      await persistTick(deps.db, episode, { traces: [], forecast: null, order: null });
+      persisted = true;
+      result.episode = episode;
+      return result;
+    }
+
     const risk = await deps.risk.current();
     const budget = await deps.budget.forAgent(agent);
     let budgetTier: BudgetTier = budget.tier;
@@ -188,7 +220,7 @@ export async function runTick(deps: Deps, agent: Agent): Promise<TickResult> {
     let traces: InferenceTrace[] = [];
     let inference: InferenceTrace | null = null;
     try {
-      const router = deps.routerFor(agent);
+      const router = deps.agentRouterFor ? await deps.agentRouterFor(agent) : deps.routerFor(agent);
       const res = await decide(router, {
         agentName: agent.name,
         config: agent.config,

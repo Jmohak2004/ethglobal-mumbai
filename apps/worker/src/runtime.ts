@@ -19,6 +19,9 @@ import { registryReader, type RegistrationReader } from "./registry.ts";
 import { LocalWalletProvider, PrivyWalletProvider, type WalletProvider } from "./wallets.ts";
 import { systemClock, type Clock, type Deps } from "./deps.ts";
 import type { ReflectionDeps } from "./reflection.ts";
+import { getAgentZgKey, type ProvisionDeps, type RegistryWriter } from "./provisioner.ts";
+import { createViemAllowanceWriter, createViemRegistryWriter } from "./provisioner-chain.ts";
+import { parseEncryptionKey } from "./secrets.ts";
 
 export interface Runtime {
   env: WorkerEnv;
@@ -36,6 +39,8 @@ export interface Runtime {
   flash: FlashClient | null;
   reflectionDeps(): ReflectionDeps;
   relayerOptions(): RelayerOptions;
+  /** Dependencies for provisioning (wallets, 0G keys, registry, allowance). */
+  provisionDeps(): ProvisionDeps;
   close(): Promise<void>;
 }
 
@@ -103,6 +108,19 @@ export function createRuntime(env: WorkerEnv, overrides: RuntimeOverrides = {}):
     return router;
   };
 
+  // Per-agent 0G keys (provisioning step c). The router is rebuilt when an agent's stored key changes.
+  const encryptionKey = env.AGENT_KEY_ENCRYPTION_KEY ? parseEncryptionKey(env.AGENT_KEY_ENCRYPTION_KEY) : null;
+  const agentRouters = new Map<string, { key: string; router: ZeroGRouter }>();
+  const agentRouterFor = async (agent: Agent): Promise<ZeroGRouter> => {
+    const key = await getAgentZgKey({ db, encryptionKey }, agent.id);
+    if (!key) return routerFor();
+    const cached = agentRouters.get(agent.id);
+    if (cached && cached.key === key) return cached.router;
+    const agentRouter = new ZeroGRouter({ apiKey: key, baseUrl: zgBaseUrl, payer: "agent" });
+    agentRouters.set(agent.id, { key, router: agentRouter });
+    return agentRouter;
+  };
+
   const memory: MemoryStore =
     env.ZG_STORAGE_INDEXER && env.ZG_RPC_URL && env.ZG_PRIVATE_KEY
       ? new ZeroGStorage({ rpcUrl: env.ZG_RPC_URL, indexerUrl: env.ZG_STORAGE_INDEXER, privateKey: env.ZG_PRIVATE_KEY })
@@ -130,6 +148,19 @@ export function createRuntime(env: WorkerEnv, overrides: RuntimeOverrides = {}):
     : null;
   const registry = env.REGISTRY_ADDRESS ? registryReader(client, env.REGISTRY_ADDRESS as Hex) : null;
 
+  // Provisioning writers. Each is null when its keys are missing, and the matching step is then skipped.
+  const registryWriter: RegistryWriter | null =
+    env.REGISTRY_ADDRESS && env.PLATFORM_ADMIN_PRIVATE_KEY && env.OPERATOR_PRIVATE_KEY
+      ? createViemRegistryWriter({
+          chain,
+          registry: env.REGISTRY_ADDRESS as Hex,
+          platformKey: env.PLATFORM_ADMIN_PRIVATE_KEY as Hex,
+          operatorKey: env.OPERATOR_PRIVATE_KEY as Hex,
+        })
+      : null;
+  const usdc = chain.tokens.USDC?.address;
+  const allowanceWriter = usdc ? createViemAllowanceWriter({ chain, usdc }) : null;
+
   const deps: Deps = {
     db,
     clock,
@@ -142,6 +173,7 @@ export function createRuntime(env: WorkerEnv, overrides: RuntimeOverrides = {}):
     wallets,
     executor,
     routerFor,
+    agentRouterFor,
     // Flash cancel and PATCH need signed messages that this repo does not define yet (see crash.ts). Until
     // an implementation is supplied, live cancels and stop changes fail with a recorded error.
     orderControl: null,
@@ -159,6 +191,19 @@ export function createRuntime(env: WorkerEnv, overrides: RuntimeOverrides = {}):
     perf,
     registry,
     flash,
+
+    provisionDeps: () => ({
+      db,
+      clock,
+      logger,
+      wallets,
+      zgAccount,
+      encryptionKey,
+      zgCreditLimit: env.AGENT_DAILY_0G_CAP,
+      registry: registryWriter,
+      allowance: allowanceWriter,
+      treasury: (env.TREASURY_ADDRESS as Hex | undefined) ?? null,
+    }),
 
     reflectionDeps: () => ({
       db,

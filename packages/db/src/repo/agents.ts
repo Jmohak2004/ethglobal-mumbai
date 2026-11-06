@@ -1,7 +1,7 @@
-import { and, desc, eq, inArray } from "drizzle-orm";
-import type { Agent, AgentStatus, ExecutionMode, StrategyConfig, TemplateId } from "@arena/shared";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { toUsd6, type Agent, type AgentStatus, type ExecutionMode, type StrategyConfig, type TemplateId } from "@arena/shared";
 import type { Db } from "../client.ts";
-import { agentConfigVersions, agents } from "../schema.ts";
+import { agentConfigVersions, agents, type ProvisioningState } from "../schema.ts";
 import { ensureUser } from "./users.ts";
 import { addr, clampLimit, hex, newId } from "./util.ts";
 
@@ -222,3 +222,97 @@ function toAgent(row: AgentRow): Agent {
     createdAt: row.createdAt,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Provisioning (trading wallet, 0G wallet and key, AgentRegistry, treasury allowance)
+// ---------------------------------------------------------------------------
+
+/** The zero address. Agents created before provisioning carry it as their trading wallet. */
+export const PLACEHOLDER_WALLET = "0x0000000000000000000000000000000000000000";
+
+/** True for a missing or zero address: the agent has no trading wallet yet. */
+export function isPlaceholderWallet(address: string | null | undefined): boolean {
+  return !address || addr(address) === PLACEHOLDER_WALLET;
+}
+
+/** Which optional steps this environment can perform. A step the environment cannot perform is not a gap. */
+export interface ProvisioningRequirements {
+  /** The wallet provider can derive a 0G wallet. */
+  zgWallet?: boolean;
+  /** ZG_MGMT_KEY and AGENT_KEY_ENCRYPTION_KEY are set. */
+  zgKey?: boolean;
+  /** AgentRegistry, platform and operator keys are set. */
+  registration?: boolean;
+  /** TREASURY_ADDRESS is set and the trading wallet is locally controllable. */
+  allowance?: boolean;
+}
+
+/**
+ * Names of the provisioning steps this agent still needs, given the environment. Empty when provisioned.
+ * A registered agent whose synced configHash is stale also has the "config sync" gap, and an agent whose
+ * allowance cap no longer matches limits.maxAllocationUsd has the "allowance" gap.
+ */
+export function provisioningGaps(
+  agent: Pick<Agent, "tradingWallet" | "zgWallet" | "configHash" | "config">,
+  state: ProvisioningState,
+  req: ProvisioningRequirements,
+): string[] {
+  const gaps: string[] = [];
+  if (isPlaceholderWallet(agent.tradingWallet)) gaps.push("trading wallet");
+  if (req.zgWallet && !agent.zgWallet) gaps.push("0G wallet");
+  if (req.zgKey && !state.zgKeyId) gaps.push("0G key");
+  if (req.registration && !state.registeredAt) gaps.push("registration");
+  const synced = state.syncedConfigHash?.toLowerCase();
+  if (req.registration && state.registeredAt && synced !== agent.configHash.toLowerCase()) gaps.push("config sync");
+  const cap = toUsd6(agent.config.limits.maxAllocationUsd).toString();
+  if (req.allowance && (!state.allowanceAt || state.allowanceCapUsd6 !== cap)) gaps.push("allowance");
+  return gaps;
+}
+
+/** Agents (not stopped) with at least one provisioning gap for the given environment. */
+export async function listAgentsNeedingProvisioning(db: Db, req: ProvisioningRequirements = {}): Promise<Agent[]> {
+  const rows = await db.select().from(agents).where(inArray(agents.status, ["active", "paused"])).orderBy(agents.createdAt);
+  const out: Agent[] = [];
+  for (const row of rows) {
+    const agent = toAgent(row);
+    if (provisioningGaps(agent, row.provisioning ?? {}, req).length > 0) out.push(agent);
+  }
+  return out;
+}
+
+/** Stored provisioning state, or null when the agent does not exist. */
+export async function getProvisioning(db: Db, agentId: string): Promise<ProvisioningState | null> {
+  const [row] = await db.select({ provisioning: agents.provisioning }).from(agents).where(eq(agents.id, agentId)).limit(1);
+  return row ? (row.provisioning ?? {}) : null;
+}
+
+/** Sets the trading and/or 0G wallet. Omitted fields are left alone. A null zgWallet clears it. */
+export async function setAgentWallets(
+  db: Db,
+  agentId: string,
+  wallets: { tradingWallet?: string; zgWallet?: string | null },
+): Promise<Agent | null> {
+  const patch: Partial<typeof agents.$inferInsert> = {};
+  if (wallets.tradingWallet !== undefined) patch.tradingWallet = addr(wallets.tradingWallet);
+  if (wallets.zgWallet !== undefined) patch.zgWallet = wallets.zgWallet ? addr(wallets.zgWallet) : null;
+  if (Object.keys(patch).length === 0) return getAgent(db, agentId);
+  const [row] = await db.update(agents).set(patch).where(eq(agents.id, agentId)).returning();
+  return row ? toAgent(row) : null;
+}
+
+/**
+ * Shallow-merges a patch into the agent's provisioning jsonb, in one statement. Keys with undefined are
+ * skipped (JSON.stringify drops them); null clears a field. Returns the merged state.
+ */
+export async function updateProvisioning(db: Db, agentId: string, patch: ProvisioningState): Promise<ProvisioningState> {
+  const [row] = await db
+    .update(agents)
+    .set({
+      provisioning: sql`coalesce(${agents.provisioning}, '{}'::jsonb) || ${JSON.stringify(patch)}::jsonb`,
+    })
+    .where(eq(agents.id, agentId))
+    .returning({ provisioning: agents.provisioning });
+  if (!row) throw new Error(`updateProvisioning: agent not found: ${agentId}`);
+  return row.provisioning ?? {};
+}
+

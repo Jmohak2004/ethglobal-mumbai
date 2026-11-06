@@ -13,8 +13,13 @@ export const WorkerEnvSchema = EnvSchema.extend({
   DEV_AGENT_MNEMONIC: z.string().optional(),
   /** Dev-only: one shared trading key for every agent (LocalWalletProvider). */
   DEV_AGENT_PRIVATE_KEY: privateKey.optional(),
-  /** 0G management key (`mk-…`). Enables real per-account balances via ZeroGAccount. */
+  /** 0G management key (`mk-…`). Enables real per-account balances via ZeroGAccount, and per-agent capped keys. */
   ZG_MGMT_KEY: z.string().optional(),
+  /** 32-byte hex key (AES-256-GCM) that encrypts per-agent 0G secrets at rest. Required to mint or use them. */
+  AGENT_KEY_ENCRYPTION_KEY: z
+    .string()
+    .regex(/^(0x)?[0-9a-fA-F]{64}$/, "must be 32 bytes of hex")
+    .optional(),
   /** 0G chain RPC for storage uploads and the Payment Layer deposit. */
   ZG_RPC_URL: z.string().optional(),
   ZG_STORAGE_INDEXER: z.string().optional(),
@@ -35,8 +40,10 @@ export const WorkerEnvSchema = EnvSchema.extend({
   /** Blocks per eth_getLogs call when scanning PerformanceReported logs. Keeps each call under RPC range limits. */
   LOG_CHUNK_BLOCKS: z.coerce.number().int().positive().default(2000),
 
-  /** Operator key: calls AgentTreasury.topUp and collectCommission. */
+  /** Operator key: calls AgentTreasury.topUp and collectCommission, and AgentRegistry.updateConfig. */
   OPERATOR_PRIVATE_KEY: privateKey.optional(),
+  /** Platform admin key: calls AgentRegistry.register (the registry `platform` role). */
+  PLATFORM_ADMIN_PRIVATE_KEY: privateKey.optional(),
   /** Key on the 0G chain that pays for Payment Layer deposits. */
   RELAYER_ZG_PRIVATE_KEY: privateKey.optional(),
   /** Per-request guard: a TopUpRequested above this many USDC is not converted. */

@@ -41,6 +41,38 @@ const ms = (name: string) => bigint(name, { mode: "number" });
 // Identity and agents
 // ---------------------------------------------------------------------------
 
+/**
+ * Provisioning progress for one agent (worker provisioner.ts). Every field is optional: a missing field
+ * means that step has not finished. Updates are shallow merges, so a patch never erases other steps.
+ */
+export interface ProvisioningState {
+  /** Trading wallet derived and stored (unix ms). */
+  walletAt?: number;
+  zgWalletAt?: number;
+  /** Public id of the agent's capped 0G key. The secret is in zg_keys.encrypted_secret. */
+  zgKeyId?: string;
+  zgKeyAt?: number;
+  /** AgentRegistry.register tx. Null when the agent was already registered onchain and this worker did not send it. */
+  registeredTx?: `0x${string}` | null;
+  registeredAt?: number;
+  /** configHash last written onchain (by register or updateConfig). */
+  syncedConfigHash?: `0x${string}`;
+  configTx?: `0x${string}`;
+  configAt?: number;
+  /** USDC approve(AgentTreasury, cap) from the trading wallet. */
+  allowanceTx?: `0x${string}`;
+  allowanceAt?: number;
+  /** The USD6 cap (decimal string) the allowance was last set to. A changed cap triggers a new approve. */
+  allowanceCapUsd6?: string;
+  /** True while the trading wallet has no ETH for gas. Retried later, not an error. */
+  needsGas?: boolean;
+  /** Last failure, cleared when a pass completes. */
+  error?: string | null;
+  attempts?: number;
+  /** Earliest unix ms for the next automatic attempt after a failure. */
+  nextAttemptAt?: number | null;
+}
+
 export const users = pgTable("users", {
   address: text("address").primaryKey(),
   displayName: text("display_name"),
@@ -68,6 +100,8 @@ export const agents = pgTable(
     configHash: text("config_hash").notNull(),
     forkedFrom: text("forked_from").references((): AnyPgColumn => agents.id),
     createdAt: ms("created_at").notNull(),
+    /** Provisioning steps and their tx hashes. See ProvisioningState. */
+    provisioning: jsonb("provisioning").$type<ProvisioningState>().notNull().default({}),
   },
   (t) => [
     index("agents_owner_idx").on(t.ownerAddress),
@@ -275,7 +309,7 @@ export const inferenceCalls = pgTable(
 export const zgKeys = pgTable(
   "zg_keys",
   {
-    /** Public key id only. The sk- secret is never stored. */
+    /** Public key id. */
     keyId: text("key_id").primaryKey(),
     agentId: text("agent_id")
       .notNull()
@@ -283,6 +317,8 @@ export const zgKeys = pgTable(
     creditLimit: doublePrecision("credit_limit").notNull(),
     resetPeriod: text("reset_period").notNull().default("daily"),
     createdAt: ms("created_at").notNull(),
+    /** AES-256-GCM ciphertext of the sk- secret (worker secrets.ts). Plaintext secrets are never stored. */
+    encryptedSecret: text("encrypted_secret"),
   },
   (t) => [index("zg_keys_agent_idx").on(t.agentId)],
 );

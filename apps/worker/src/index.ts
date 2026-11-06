@@ -1,9 +1,10 @@
 #!/usr/bin/env bun
 // Worker CLI.
-//   bun src/index.ts run              migrate, then scheduler, forecast resolver, crash guard, stats/attestation sync, treasury loops
-//   bun src/index.ts relayer          poll TopUpRequested and deposit 0G through the Payment Layer
-//   bun src/index.ts tick <agentId>   one decision tick; prints the episode JSON
-//   bun src/index.ts seed-demo        two paper demo agents, only when the database has no agents
+//   bun src/index.ts run                 migrate, then scheduler, provisioning, forecast resolver, crash guard, stats/attestation sync, treasury loops
+//   bun src/index.ts relayer             poll TopUpRequested and deposit 0G through the Payment Layer
+//   bun src/index.ts tick <agentId>      one decision tick; prints the episode JSON
+//   bun src/index.ts provision <agentId> run every provisioning step now (ignores backoff); prints the result
+//   bun src/index.ts seed-demo           two paper demo agents, only when the database has no agents
 
 import { getAgent, migrate } from "@arena/db";
 import { loadWorkerEnv, type WorkerEnv } from "./env.ts";
@@ -17,9 +18,11 @@ import { checkRegistrations } from "./registry.ts";
 import { reflectAgent } from "./reflection.ts";
 import { runRelayerOnce } from "./economics/relayer.ts";
 import { seedDemoAgents } from "./seed.ts";
+import { provisionAgent, provisionPass } from "./provisioner.ts";
 import type { Agent } from "@arena/shared";
 
 const FORECAST_EVERY_MS = 60_000;
+const PROVISION_EVERY_MS = 30_000;
 const RISK_CHECK_EVERY_MS = 30_000;
 const ATTEST_EVERY_MS = 15 * 60_000;
 const TREASURY_EVERY_MS = 15 * 60_000;
@@ -27,10 +30,11 @@ const REFLECT_CHECK_EVERY_MS = 10 * 60_000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 const USAGE = `usage: bun src/index.ts <command>
-  run              migrate, then start the scheduler and background loops
-  relayer          poll TopUpRequested and deposit 0G
-  tick <agentId>   run one decision tick and print the episode JSON
-  seed-demo        create two paper demo agents when the database is empty`;
+  run                 migrate, then start the scheduler and background loops
+  relayer             poll TopUpRequested and deposit 0G
+  tick <agentId>      run one decision tick and print the episode JSON
+  provision <agentId> run every provisioning step for one agent now and print the result
+  seed-demo           create two paper demo agents when the database is empty`;
 
 /** Shared work after each tick: reflect after a sell, and request a top-up when the budget is low. */
 export async function afterTick(rt: Runtime, agent: Agent, result: TickResult): Promise<void> {
@@ -95,7 +99,21 @@ async function cmdRun(env: WorkerEnv): Promise<void> {
   };
   const crash = createCrashGuard({ deps: rt.deps, loadAgents: () => loadAgents(db) });
   const reflectLastRun = new Map<string, number>();
+  // Provisioning passes can outlast the interval (RPC calls), so a pass never starts while one is running.
+  let provisioning = false;
+  const provision = async () => {
+    if (provisioning) return;
+    provisioning = true;
+    try {
+      const results = await provisionPass(rt.provisionDeps());
+      const failed = results.filter((r) => r.status === "failed").length;
+      if (results.length > 0) log.info("provisioning pass", { agents: results.length, failed });
+    } finally {
+      provisioning = false;
+    }
+  };
   const timers: ReturnType<typeof setInterval>[] = [
+    setInterval(() => void provision().catch((e) => log.error("provisioning pass failed", { error: e })), PROVISION_EVERY_MS),
     setInterval(() => void poll().catch((e) => log.error("forecast or order poll failed", { error: e })), FORECAST_EVERY_MS),
     setInterval(() => void crash.check().catch((e) => log.error("crash guard failed", { error: e })), RISK_CHECK_EVERY_MS),
     setInterval(() => void attest().catch((e) => log.error("stats or attestation sync failed", { error: e })), ATTEST_EVERY_MS),
@@ -103,6 +121,7 @@ async function cmdRun(env: WorkerEnv): Promise<void> {
     setInterval(() => void dailyReflections(rt, reflectLastRun).catch((e) => log.error("daily reflection failed", { error: e })), REFLECT_CHECK_EVERY_MS),
   ];
   // Kick the slow loops off once at startup.
+  void provision().catch((e) => log.error("provisioning pass failed", { error: e }));
   void poll().catch((e) => log.error("forecast or order poll failed", { error: e }));
   void crash.check().catch((e) => log.error("crash guard failed", { error: e }));
   void attest().catch((e) => log.error("stats or attestation sync failed", { error: e }));
@@ -177,6 +196,26 @@ async function cmdTick(env: WorkerEnv, agentId: string | undefined): Promise<num
   return result.error ? 1 : 0;
 }
 
+/** Runs every provisioning step for one agent, ignoring backoff. Exit code 1 when a step failed. */
+async function cmdProvision(env: WorkerEnv, agentId: string | undefined): Promise<number> {
+  if (!agentId) {
+    console.error(USAGE);
+    return 2;
+  }
+  const rt = createRuntime(env);
+  await migrate(rt.db);
+  const agent = await getAgent(rt.db, agentId);
+  if (!agent) {
+    console.error(`no agent with id ${agentId}`);
+    await rt.close();
+    return 1;
+  }
+  const result = await provisionAgent(rt.provisionDeps(), agent, { force: true });
+  console.log(JSON.stringify(result, null, 2));
+  await rt.close();
+  return result.status === "failed" ? 1 : 0;
+}
+
 async function cmdSeed(env: WorkerEnv): Promise<number> {
   const rt = createRuntime(env);
   await migrate(rt.db);
@@ -202,6 +241,8 @@ async function main(): Promise<number> {
       return 0;
     case "tick":
       return cmdTick(env, args[0]);
+    case "provision":
+      return cmdProvision(env, args[0]);
     case "seed-demo":
       return cmdSeed(env);
     default:
