@@ -45,6 +45,38 @@ const ms = (name: string) => bigint(name, { mode: "number" });
  * Provisioning progress for one agent (worker provisioner.ts). Every field is optional: a missing field
  * means that step has not finished. Updates are shallow merges, so a patch never erases other steps.
  */
+/** One open position in an agent's (paper or live) book, marked to market. */
+export interface PortfolioPosition {
+  asset: string;
+  qty: number;
+  avgPriceUsd: number;
+  markPriceUsd: number;
+  valueUsd: number;
+  unrealizedPnlUsd: number;
+}
+
+/** Mark-to-market snapshot of an agent's book. Paper agents start with config.limits.maxAllocationUsd in cash. */
+export interface PortfolioSnapshot {
+  cashUsd: number;
+  positions: PortfolioPosition[];
+  equityUsd: number;
+  realizedPnlUsd: number;
+  unrealizedPnlUsd: number;
+  asOf: number;
+}
+
+/** Worker-written runtime status for one agent. Shallow-merged on update. */
+export interface AgentRuntimeState {
+  lastTickAt?: number;
+  nextTickAt?: number;
+  /** Short outcome of the last tick, e.g. "approve", "hold", "reject", "error", "not provisioned". */
+  lastOutcome?: string;
+  lastError?: string | null;
+  lastRequestId?: string | null;
+  portfolio?: PortfolioSnapshot;
+  updatedAt?: number;
+}
+
 export interface ProvisioningState {
   /** Trading wallet derived and stored (unix ms). */
   walletAt?: number;
@@ -102,6 +134,8 @@ export const agents = pgTable(
     createdAt: ms("created_at").notNull(),
     /** Provisioning steps and their tx hashes. See ProvisioningState. */
     provisioning: jsonb("provisioning").$type<ProvisioningState>().notNull().default({}),
+    /** Live runtime status written by the worker each tick (status panel, paper portfolio). */
+    runtime: jsonb("runtime").$type<AgentRuntimeState>().notNull().default({}),
   },
   (t) => [
     index("agents_owner_idx").on(t.ownerAddress),
@@ -555,5 +589,47 @@ export const agentStats = pgTable(
     index("agent_stats_pnl_idx").on(t.realizedPnlUsd),
     check("agent_stats_kind_check", sql`${t.kind} in ('agent', 'human')`),
     check("agent_stats_mode_check", sql`${t.mode} in ('paper', 'live')`),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// Demo / paper economics
+// ---------------------------------------------------------------------------
+
+/** "Run now" requests from the owner console. The worker claims pending rows and ticks those agents. */
+export const tickRequests = pgTable(
+  "tick_requests",
+  {
+    id: text("id").primaryKey(),
+    agentId: text("agent_id")
+      .notNull()
+      .references(() => agents.id),
+    requestedBy: text("requested_by"),
+    requestedAt: ms("requested_at").notNull(),
+    handledAt: ms("handled_at"),
+  },
+  (t) => [index("tick_requests_pending_idx").on(t.handledAt, t.requestedAt)],
+);
+
+/**
+ * Simulated (paper) self-funding ledger: commission earned on paper profit and the 0G top-ups it buys.
+ * Clearly separate from the onchain treasury tables; every row is paper money.
+ */
+export const paperLedger = pgTable(
+  "paper_ledger",
+  {
+    id: text("id").primaryKey(),
+    agentId: text("agent_id")
+      .notNull()
+      .references(() => agents.id),
+    kind: text("kind").notNull(),
+    amountUsd: doublePrecision("amount_usd").notNull(),
+    amount0g: doublePrecision("amount_0g"),
+    note: text("note"),
+    ts: ms("ts").notNull(),
+  },
+  (t) => [
+    index("paper_ledger_agent_ts_idx").on(t.agentId, t.ts),
+    check("paper_ledger_kind_check", sql`${t.kind} in ('commission', 'topup')`),
   ],
 );

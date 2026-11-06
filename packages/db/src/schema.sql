@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS agents (
 CREATE INDEX IF NOT EXISTS agents_owner_idx ON agents (owner_address);
 CREATE INDEX IF NOT EXISTS agents_template_idx ON agents (template);
 ALTER TABLE agents ADD COLUMN IF NOT EXISTS provisioning JSONB NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS runtime JSONB NOT NULL DEFAULT '{}'::jsonb;
 
 CREATE TABLE IF NOT EXISTS agent_config_versions (
   agent_id TEXT NOT NULL REFERENCES agents (id),
@@ -309,3 +310,24 @@ CREATE TABLE IF NOT EXISTS agent_stats (
   CONSTRAINT agent_stats_mode_check CHECK (mode IN ('paper', 'live'))
 );
 CREATE INDEX IF NOT EXISTS agent_stats_pnl_idx ON agent_stats (realized_pnl_usd);
+
+CREATE TABLE IF NOT EXISTS tick_requests (
+  id TEXT PRIMARY KEY,
+  agent_id TEXT NOT NULL REFERENCES agents (id),
+  requested_by TEXT,
+  requested_at BIGINT NOT NULL,
+  handled_at BIGINT
+);
+CREATE INDEX IF NOT EXISTS tick_requests_pending_idx ON tick_requests (handled_at, requested_at);
+
+CREATE TABLE IF NOT EXISTS paper_ledger (
+  id TEXT PRIMARY KEY,
+  agent_id TEXT NOT NULL REFERENCES agents (id),
+  kind TEXT NOT NULL,
+  amount_usd DOUBLE PRECISION NOT NULL,
+  amount_0g DOUBLE PRECISION,
+  note TEXT,
+  ts BIGINT NOT NULL,
+  CONSTRAINT paper_ledger_kind_check CHECK (kind IN ('commission', 'topup'))
+);
+CREATE INDEX IF NOT EXISTS paper_ledger_agent_ts_idx ON paper_ledger (agent_id, ts);

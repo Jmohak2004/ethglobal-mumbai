@@ -21,3 +21,4 @@ export * from "./repo/guardrails.ts";
 export * from "./repo/tg.ts";
 export * from "./repo/insights.ts";
 export * from "./repo/cursors.ts";
+export * from "./repo/demo.ts";
