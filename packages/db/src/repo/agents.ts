@@ -250,22 +250,29 @@ export interface ProvisioningRequirements {
 /**
  * Names of the provisioning steps this agent still needs, given the environment. Empty when provisioned.
  * A registered agent whose synced configHash is stale also has the "config sync" gap, and an agent whose
- * allowance cap no longer matches limits.maxAllocationUsd has the "allowance" gap.
+ * allowance cap no longer matches limits.maxAllocationUsd has the "allowance" gap. A registered agent whose
+ * onchain active flag is unknown or differs from status === "active" has the "active sync" gap.
+ * Paused agents get no 0G key or allowance gap: provisioning skips those steps while they are paused, so
+ * reporting them would keep the agent in every pass. A missing status (callers that omit it) counts as trading.
  */
 export function provisioningGaps(
-  agent: Pick<Agent, "tradingWallet" | "zgWallet" | "configHash" | "config">,
+  agent: Pick<Agent, "tradingWallet" | "zgWallet" | "configHash" | "config"> & Partial<Pick<Agent, "status">>,
   state: ProvisioningState,
   req: ProvisioningRequirements,
 ): string[] {
   const gaps: string[] = [];
+  const trading = agent.status === undefined || agent.status === "active";
   if (isPlaceholderWallet(agent.tradingWallet)) gaps.push("trading wallet");
   if (req.zgWallet && !agent.zgWallet) gaps.push("0G wallet");
-  if (req.zgKey && !state.zgKeyId) gaps.push("0G key");
+  if (req.zgKey && trading && !state.zgKeyId) gaps.push("0G key");
   if (req.registration && !state.registeredAt) gaps.push("registration");
   const synced = state.syncedConfigHash?.toLowerCase();
   if (req.registration && state.registeredAt && synced !== agent.configHash.toLowerCase()) gaps.push("config sync");
+  if (req.registration && state.registeredAt && agent.status !== undefined && state.activeOnchain !== (agent.status === "active")) {
+    gaps.push("active sync");
+  }
   const cap = toUsd6(agent.config.limits.maxAllocationUsd).toString();
-  if (req.allowance && (!state.allowanceAt || state.allowanceCapUsd6 !== cap)) gaps.push("allowance");
+  if (req.allowance && trading && (!state.allowanceAt || state.allowanceCapUsd6 !== cap)) gaps.push("allowance");
   return gaps;
 }
 

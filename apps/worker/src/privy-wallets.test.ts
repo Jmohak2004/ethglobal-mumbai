@@ -315,7 +315,8 @@ describe("provisioning with a Privy trading wallet", () => {
   test("creates the wallet, stores its id, and sends the USDC approve from it as eth_sendTransaction", async () => {
     const db = await memoryDb();
     dbs.push(db);
-    const agent = await seedAgent(db, { tradingWallet: ZERO, zgWallet: null, status: "paused" });
+    // Active: paused agents get no allowance (provisioner step g), and this test is about the approve.
+    const agent = await seedAgent(db, { tradingWallet: ZERO, zgWallet: null, status: "active" });
     const privy = fakePrivy();
     const wallets = new PrivyWalletProvider({ client: privy.client, store: privyStoreFromDb(db), caip2: CAIP2 });
 

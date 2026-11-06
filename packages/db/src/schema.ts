@@ -91,6 +91,14 @@ export interface ProvisioningState {
   syncedConfigHash?: `0x${string}`;
   configTx?: `0x${string}`;
   configAt?: number;
+  /**
+   * The onchain active flag last confirmed by this worker (register or read). AgentRegistry.listActive() is built
+   * from it, and a paused agent must be false.
+   */
+  activeOnchain?: boolean;
+  /** AgentRegistry.setActive tx, when this worker changed the flag. */
+  activeTx?: `0x${string}` | null;
+  activeAt?: number;
   /** USDC approve(AgentTreasury, cap) from the trading wallet. */
   allowanceTx?: `0x${string}`;
   allowanceAt?: number;

@@ -115,6 +115,23 @@ describe("provisioningGaps", () => {
     expect(provisioningGaps(agent, { ...complete, syncedConfigHash: `0x${"cd".repeat(32)}` }, all)).toEqual(["config sync"]);
     expect(provisioningGaps({ ...agent, config: config(7) }, complete, all)).toEqual(["allowance"]);
   });
+
+  test("a registered agent whose onchain flag is unknown or differs from its status has the active sync gap", () => {
+    const registered = { ...complete, activeOnchain: true };
+    expect(provisioningGaps({ ...agent, status: "active" }, complete, all)).toEqual(["active sync"]);
+    expect(provisioningGaps({ ...agent, status: "paused" }, registered, all)).toEqual(["active sync"]);
+    expect(provisioningGaps({ ...agent, status: "paused" }, { ...registered, activeOnchain: false }, all)).toEqual([]);
+    expect(provisioningGaps({ ...agent, status: "active" }, registered, all)).toEqual([]);
+    // An unregistered agent has no flag to sync yet.
+    expect(provisioningGaps({ ...agent, status: "paused" }, {}, { registration: true })).toEqual(["registration"]);
+  });
+
+  test("paused agents have no 0G key or allowance gap, since provisioning skips both while paused", () => {
+    const state = { registeredAt: 1, syncedConfigHash: HASH, activeOnchain: false };
+    const req = { zgKey: true, allowance: true, registration: true };
+    expect(provisioningGaps({ ...agent, status: "paused" }, state, req)).toEqual([]);
+    expect(provisioningGaps({ ...agent, status: "active" }, state, req)).toEqual(["0G key", "active sync", "allowance"]);
+  });
 });
 
 describe("listAgentsNeedingProvisioning", () => {

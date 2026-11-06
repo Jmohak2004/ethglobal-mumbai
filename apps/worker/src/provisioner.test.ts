@@ -1,5 +1,5 @@
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
-import { closeDb, createAgent, getAgent, getZgKeySecret, updateConfig, type Db } from "@arena/db";
+import { closeDb, createAgent, getAgent, getProvisioning, getZgKeySecret, setAgentStatus, updateConfig, type Db } from "@arena/db";
 import { configHash } from "@arena/policy";
 import { agentIdToBytes32, toUsd6, type Agent, type StrategyConfig } from "@arena/shared";
 import type { CreatedKey, CreateCappedKeyInput } from "@arena/zerog";
@@ -42,6 +42,7 @@ class FakeRegistry implements RegistryWriter {
   readonly onchain = new Map<Hex, OnchainAgentRecord>();
   readonly registers: Array<{ id: Hex; record: OnchainAgentRecord }> = [];
   readonly updates: Array<{ id: Hex; configHash: Hex }> = [];
+  readonly activeUpdates: Array<{ id: Hex; active: boolean }> = [];
   failRegister: string | null = null;
 
   async exists(id: Hex): Promise<boolean> {
@@ -49,6 +50,10 @@ class FakeRegistry implements RegistryWriter {
   }
   async configHashOf(id: Hex): Promise<Hex | null> {
     return this.onchain.get(id)?.configHash ?? null;
+  }
+  async isActive(id: Hex): Promise<boolean | null> {
+    const record = this.onchain.get(id);
+    return record ? record.active : null;
   }
   async register(id: Hex, record: OnchainAgentRecord): Promise<Hex> {
     if (this.failRegister) throw new Error(this.failRegister);
@@ -61,6 +66,14 @@ class FakeRegistry implements RegistryWriter {
     const record = this.onchain.get(id);
     if (record) this.onchain.set(id, { ...record, configHash: hash });
     return txHash("u", this.updates.length);
+  }
+  async setActive(id: Hex, active: boolean): Promise<Hex> {
+    const record = this.onchain.get(id);
+    // The contract reverts AgentNotFound for an unregistered id.
+    if (!record) throw new Error("AgentNotFound");
+    this.activeUpdates.push({ id, active });
+    this.onchain.set(id, { ...record, active });
+    return txHash("s", this.activeUpdates.length);
   }
 }
 
@@ -150,6 +163,7 @@ describe("provisioning: happy path", () => {
       zgKey: "done",
       registration: "done",
       configSync: "already",
+      activeSync: "already",
       allowance: "done",
     });
 
@@ -207,6 +221,7 @@ describe("provisioning: happy path", () => {
       zgKey: "already",
       registration: "already",
       configSync: "already",
+      activeSync: "already",
       allowance: "already",
     });
     expect(minter.calls).toHaveLength(1);
@@ -279,6 +294,7 @@ describe("provisioning: missing config skips steps", () => {
       zgKey: "skipped",
       registration: "skipped",
       configSync: "skipped",
+      activeSync: "skipped",
       allowance: "skipped",
     });
     expect(minter.calls).toHaveLength(0);
@@ -590,6 +606,121 @@ describe("provisioning: config sync", () => {
     expect(state?.registeredAt).toBeDefined();
     expect(state?.registeredTx).toBeNull();
     expect(state?.syncedConfigHash).toBe(agent.configHash);
+  });
+});
+
+describe("provisioning: onchain active flag", () => {
+  let db: Db;
+  let clock: ReturnType<typeof fixedClock>;
+  let wallets: LocalWalletProvider;
+  let registry: FakeRegistry;
+  let allowance: FakeAllowance;
+  let deps: ProvisionDeps;
+
+  beforeEach(async () => {
+    db = await freshDb();
+    clock = fixedClock();
+    wallets = new LocalWalletProvider({ mnemonic: generateMnemonic(english) });
+    registry = new FakeRegistry();
+    allowance = new FakeAllowance();
+    deps = {
+      db,
+      clock,
+      logger: silentLogger,
+      wallets,
+      zgAccount: null,
+      encryptionKey: null,
+      zgCreditLimit: 1,
+      registry,
+      allowance,
+      treasury: TREASURY,
+    };
+  });
+
+  /** Gas for the agent's trading wallet, so an active agent's approve can go through. */
+  const fund = (agent: Agent) => allowance.eth.set(wallets.localAccountFor({ id: agent.id }).address.toLowerCase(), 10n ** 16n);
+  const onchainId = (agent: Agent) => agentIdToBytes32(agent.id);
+  const refresh = async (agent: Agent) => (await getAgent(db, agent.id)) as Agent;
+
+  test("a paused agent registers inactive and the flag is recorded", async () => {
+    const paused = await unprovisionedAgent(db, { status: "paused" });
+    const result = await provisionAgent(deps, paused);
+
+    expect(registry.registers[0]?.record.active).toBe(false);
+    expect(result.steps.registration).toBe("done");
+    expect(result.steps.activeSync).toBe("already");
+    expect(registry.activeUpdates).toEqual([]);
+    expect(await getProvisioning(db, paused.id)).toMatchObject({ activeOnchain: false });
+  });
+
+  test("pausing a registered agent sets it inactive onchain once, and a rerun sends nothing", async () => {
+    const agent = await unprovisionedAgent(db);
+    fund(agent);
+    await provisionAgent(deps, agent);
+    expect(registry.onchain.get(onchainId(agent))?.active).toBe(true);
+
+    await setAgentStatus(db, agent.id, "paused");
+    const paused = await provisionAgent(deps, await refresh(agent));
+    expect(paused.status).toBe("ok");
+    expect(paused.steps.activeSync).toBe("done");
+    expect(registry.activeUpdates).toEqual([{ id: onchainId(agent), active: false }]);
+    expect(await getProvisioning(db, agent.id)).toMatchObject({ activeOnchain: false, activeTx: txHash("s", 1), activeAt: clock.now() });
+
+    const again = await provisionAgent(deps, await refresh(agent));
+    expect(again.steps.activeSync).toBe("already");
+    expect(registry.activeUpdates).toHaveLength(1);
+  });
+
+  test("resuming a paused agent sets it active onchain, then its allowance is set", async () => {
+    const agent = await unprovisionedAgent(db, { status: "paused" });
+    fund(agent);
+    await provisionAgent(deps, agent);
+    expect(registry.onchain.get(onchainId(agent))?.active).toBe(false);
+
+    await setAgentStatus(db, agent.id, "active");
+    const resumed = await provisionAgent(deps, await refresh(agent));
+    expect(resumed.steps.activeSync).toBe("done");
+    expect(registry.activeUpdates).toEqual([{ id: onchainId(agent), active: true }]);
+    expect(resumed.steps.allowance).toBe("done");
+    expect(allowance.approvals).toHaveLength(1);
+
+    const again = await provisionAgent(deps, await refresh(agent));
+    expect(again.steps.activeSync).toBe("already");
+    expect(registry.activeUpdates).toHaveLength(1);
+  });
+
+  test("paused agents skip the allowance, and once provisioned they are not in the pass", async () => {
+    const agent = await unprovisionedAgent(db, { status: "paused" });
+    fund(agent);
+    const result = await provisionAgent(deps, agent);
+    expect(result.status).toBe("ok");
+    expect(result.steps.allowance).toBe("skipped");
+    expect(allowance.approvals).toHaveLength(0);
+    expect(await provisionPass(deps)).toEqual([]);
+  });
+
+  test("an agent registered before this flag was tracked is corrected once to match its paused status", async () => {
+    const paused = await unprovisionedAgent(db, { status: "paused" });
+    registry.onchain.set(onchainId(paused), {
+      owner: paused.ownerAddress,
+      tradingWallet: wallets.localAccountFor({ id: paused.id }).address,
+      operator: OPERATOR,
+      zgWallet: ZERO,
+      creator: paused.ownerAddress,
+      configHash: paused.configHash,
+      forkedFrom: `0x${"0".repeat(64)}`,
+      template: 0,
+      commissionBps: 1000,
+      forkPriceUsd6: 0n,
+      forkable: false,
+      active: true,
+    });
+
+    const result = await provisionAgent(deps, paused);
+    expect(result.steps.registration).toBe("already");
+    expect(result.steps.activeSync).toBe("done");
+    expect(registry.activeUpdates).toEqual([{ id: onchainId(paused), active: false }]);
+    expect(await getProvisioning(db, paused.id)).toMatchObject({ activeOnchain: false });
   });
 });
 

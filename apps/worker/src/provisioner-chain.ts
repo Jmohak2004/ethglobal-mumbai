@@ -29,7 +29,7 @@ export function createViemRegistryWriter(opts: {
 
   const writeAndWait = async (
     client: typeof platform,
-    functionName: "register" | "updateConfig",
+    functionName: "register" | "updateConfig" | "setActive",
     args: readonly unknown[],
   ): Promise<Hex> => {
     const hash = await client.writeContract({ address: opts.registry, abi: AGENT_REGISTRY_ABI, functionName, args });
@@ -60,12 +60,26 @@ export function createViemRegistryWriter(opts: {
       return agent.owner.toLowerCase() === ZERO_ADDRESS ? null : agent.configHash;
     },
 
+    async isActive(agentIdBytes32) {
+      const agent = (await publicClient.readContract({
+        address: opts.registry,
+        abi: AGENT_REGISTRY_ABI,
+        functionName: "getAgent",
+        args: [agentIdBytes32],
+      })) as { owner: Hex; active: boolean };
+      return agent.owner.toLowerCase() === ZERO_ADDRESS ? null : agent.active;
+    },
+
     async register(agentIdBytes32, record: OnchainAgentRecord) {
       return writeAndWait(platform, "register", [agentIdBytes32, record]);
     },
 
     async updateConfig(agentIdBytes32, configHash) {
       return writeAndWait(operator, "updateConfig", [agentIdBytes32, configHash]);
+    },
+
+    async setActive(agentIdBytes32, active) {
+      return writeAndWait(platform, "setActive", [agentIdBytes32, active]);
     },
   };
 }

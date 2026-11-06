@@ -4,9 +4,10 @@
 //   a. trading wallet    WalletProvider.addressFor -> agents.trading_wallet
 //   b. 0G wallet         WalletProvider.zgAddressFor -> agents.zg_wallet
 //   c. 0G capped key     ZG_MGMT_KEY: createCappedKey, secret encrypted into zg_keys.encrypted_secret
-//   d. registration      AgentRegistry.register from the platform admin (skipped when exists())
+//   d. registration      AgentRegistry.register from the platform admin (skipped when exists()); active = status is active
 //   e. config sync       AgentRegistry.updateConfig from the operator when configHash changed
-//   f. USDC allowance    approve(AgentTreasury, maxAllocationUsd) from the trading wallet; waits for gas
+//   f. active sync       AgentRegistry.setActive from the platform admin when the onchain flag differs from status
+//   g. USDC allowance    approve(AgentTreasury, maxAllocationUsd) from the trading wallet; waits for gas; active agents only
 
 import {
   getAgent,
@@ -78,8 +79,11 @@ export interface RegistryWriter {
   exists(agentIdBytes32: Hex): Promise<boolean>;
   /** The configHash stored onchain, or null when the agent is not registered. */
   configHashOf(agentIdBytes32: Hex): Promise<Hex | null>;
+  /** The onchain active flag, or null when the agent is not registered. */
+  isActive(agentIdBytes32: Hex): Promise<boolean | null>;
   register(agentIdBytes32: Hex, record: OnchainAgentRecord): Promise<Hex>;
   updateConfig(agentIdBytes32: Hex, configHash: Hex): Promise<Hex>;
+  setActive(agentIdBytes32: Hex, active: boolean): Promise<Hex>;
 }
 
 /** Base-side reads and the USDC approve. The approve is sent by the trading wallet, local or Privy. */
@@ -109,7 +113,7 @@ export interface ProvisionDeps {
   treasury: Hex | null;
 }
 
-export type StepName = "wallet" | "zgWallet" | "zgKey" | "registration" | "configSync" | "allowance";
+export type StepName = "wallet" | "zgWallet" | "zgKey" | "registration" | "configSync" | "activeSync" | "allowance";
 /** done: performed now. already: found in place. skipped: config absent. waiting: needs gas. */
 export type StepStatus = "done" | "already" | "skipped" | "waiting";
 
@@ -245,6 +249,7 @@ export async function provisionAgent(deps: ProvisionDeps, agent: Agent, opts: { 
         const source = current.forkedFrom ? await getAgent(deps.db, current.forkedFrom) : null;
         const templateIndex = TEMPLATE_INDEX[current.config.template];
         if (templateIndex === undefined) throw new Error(`no registry index for template ${current.config.template}`);
+        const wantActive = current.status === "active";
         const txHash = await registry.register(id32, {
           owner: current.ownerAddress,
           tradingWallet: current.tradingWallet,
@@ -257,9 +262,9 @@ export async function provisionAgent(deps: ProvisionDeps, agent: Agent, opts: { 
           commissionBps: current.config.commissionBps,
           forkPriceUsd6: toUsd6(current.config.fork.priceUsd),
           forkable: current.config.fork.forkable,
-          active: true,
+          active: wantActive,
         });
-        await save({ registeredTx: txHash, registeredAt: now, syncedConfigHash: current.configHash });
+        await save({ registeredTx: txHash, registeredAt: now, syncedConfigHash: current.configHash, activeOnchain: wantActive });
         result.steps.registration = "done";
       }
     }
@@ -275,13 +280,33 @@ export async function provisionAgent(deps: ProvisionDeps, agent: Agent, opts: { 
       result.steps.configSync = "done";
     }
 
-    // f. USDC allowance to AgentTreasury, capped at maxAllocationUsd. Needs ETH on the trading wallet for gas.
+    // f. Active flag. listActive() feeds the CRE performance attestor, so a paused agent must read false onchain.
+    // Read first and write only when the flag differs from status.
+    if (!registry || !state.registeredAt) {
+      result.steps.activeSync = "skipped";
+    } else {
+      const id32 = agentIdToBytes32(agent.id);
+      const wantActive = current.status === "active";
+      const onchain = await registry.isActive(id32);
+      if (onchain === null) throw new Error(`agent ${agent.id} is not registered onchain`);
+      if (onchain === wantActive) {
+        await save({ activeOnchain: wantActive });
+        result.steps.activeSync = "already";
+      } else {
+        const txHash = await registry.setActive(id32, wantActive);
+        await save({ activeOnchain: wantActive, activeTx: txHash, activeAt: now });
+        result.steps.activeSync = "done";
+      }
+    }
+
+    // g. USDC allowance to AgentTreasury, capped at maxAllocationUsd. Needs ETH on the trading wallet for gas.
+    // Paused agents do not trade, so they get no allowance until resumed.
     let waiting = false;
     const treasury = deps.treasury;
     const allowance = deps.allowance;
     const tradingSenderFor = deps.wallets.tradingSenderFor?.bind(deps.wallets);
     const cap = toUsd6(current.config.limits.maxAllocationUsd);
-    if (!allowance || !treasury || !tradingSenderFor) {
+    if (!allowance || !treasury || !tradingSenderFor || current.status !== "active") {
       result.steps.allowance = "skipped";
     } else if (state.allowanceAt && state.allowanceCapUsd6 === cap.toString()) {
       result.steps.allowance = "already";
