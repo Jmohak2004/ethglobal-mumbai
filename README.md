@@ -188,19 +188,27 @@ Self-funding loop evidence, in order:
 - Worker side: `apps/worker/src/stats.ts` (`syncAttestations`) and `apps/worker/src/risk.ts`.
 - Simulation commands and sample output: see `cre/README.md`.
 
-CRE report transaction hashes on Base: `<TBD: report tx hashes>`
+CRE report transactions on Base Sepolia (`cre workflow simulate … --broadcast`; the simulation forwarder delivers each report to the contract's `onReport`):
+
+| Workflow | Report | Transaction |
+|---|---|---|
+| WF2 Crash Sentinel | HALT, reason 5 (simulated crash) | [`0x6e97ab17…3e9208`](https://sepolia.basescan.org/tx/0x6e97ab1764013d0c517a7853c461e6a19a494716b47baeb55a4355267e3e9208) |
+| WF2 Crash Sentinel | NORMAL (clear) | [`0x2c4ba0fc…1b2ae5`](https://sepolia.basescan.org/tx/0x2c4ba0fc80fb96cabcf7a8fe889e7369c8262e1729f7360fbd46a2428a1b2ae5) |
+| WF1 Performance Attestor | 3 agents (paper agents, so zero Flash volume) | [`0x10eea67f…a9ed099`](https://sepolia.basescan.org/tx/0x10eea67fc070ebaa22c16e0d131b83ce84a134c46675e2ad527617991a9ed099) |
+
+Each WF2 run reads Chainlink ETH/USD and BTC/USD feeds, CoinGecko, and a 0G LLM risk score (`glm-5.3-flash`).
 
 ### Deployed contracts
 
 | Contract | Base Sepolia (testnet) | Base mainnet (demo) |
 |---|---|---|
-| AgentRegistry | `<TBD>` | `<TBD>` |
-| StrategyMarketplace | `<TBD>` | `<TBD>` |
-| PerformanceRegistry | `<TBD>` | `<TBD>` |
-| AgentTreasury | `<TBD>` | `<TBD>` |
-| RiskOracle | `<TBD>` | `<TBD>` |
+| AgentRegistry | [`0x5396bcEec270cA05F9470c95eA1691e3cB037eB6`](https://sepolia.basescan.org/address/0x5396bcEec270cA05F9470c95eA1691e3cB037eB6) | `<TBD>` |
+| StrategyMarketplace | [`0x8F812de59869Da2c85c50C58a0cafe177bbd6Ff2`](https://sepolia.basescan.org/address/0x8F812de59869Da2c85c50C58a0cafe177bbd6Ff2) | `<TBD>` |
+| PerformanceRegistry | [`0xa69123a34E6387127d31A8BAbFE1eC52BCCC72a9`](https://sepolia.basescan.org/address/0xa69123a34E6387127d31A8BAbFE1eC52BCCC72a9) | `<TBD>` |
+| AgentTreasury | [`0xA7Bb4EF5c8Dfc155cDFc2E6B36624797f02BcD2e`](https://sepolia.basescan.org/address/0xA7Bb4EF5c8Dfc155cDFc2E6B36624797f02BcD2e) | `<TBD>` |
+| RiskOracle | [`0x25e7c051C59c53Ca4Df55417160ad4673cf0B19a`](https://sepolia.basescan.org/address/0x25e7c051C59c53Ca4Df55417160ad4673cf0B19a) | `<TBD>` |
 
-Verified source on BaseScan: `<TBD: links>`
+Deployment record: `contracts/deployments/baseSepolia.json` and `contracts/broadcast/Deploy.s.sol/84532/`. Source verification on BaseScan: `<TBD: needs a BaseScan API key>`.
 
 ## How we used AI
 
