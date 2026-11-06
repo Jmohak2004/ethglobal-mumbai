@@ -10,15 +10,16 @@ export type AgentStatus = "active" | "paused" | "stopped";
 export type RiskLevel = "NORMAL" | "CAUTION" | "HALT";
 export const RISK_LEVELS: readonly RiskLevel[] = ["NORMAL", "CAUTION", "HALT"] as const;
 
-/** Mirrors RiskOracle.reasonCode (uint16). */
-export enum RiskReason {
-  None = 0,
-  PriceDrop = 1,
-  Volatility = 2,
-  Depeg = 3,
-  News = 4,
-  ManualSimulation = 5,
-}
+/** Mirrors RiskOracle.reasonCode (uint16). A const object, not an enum, so Node's type stripping can load it. */
+export const RiskReason = {
+  None: 0,
+  PriceDrop: 1,
+  Volatility: 2,
+  Depeg: 3,
+  News: 4,
+  ManualSimulation: 5,
+} as const;
+export type RiskReason = (typeof RiskReason)[keyof typeof RiskReason];
 
 export type BudgetTier = "healthy" | "low" | "critical" | "empty";
 
