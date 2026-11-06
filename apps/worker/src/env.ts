@@ -29,6 +29,8 @@ export const WorkerEnvSchema = EnvSchema.extend({
   ZG_PER_USDC: z.coerce.number().positive().optional(),
   /** Assumed 0G credit per agent when no management key is set (estimate = seed − billed). */
   AGENT_SEED_CREDIT_0G: num(1),
+  /** Comma list of curated RSS/Atom feeds for insight sources. Unset uses the built-in defaults (PRD 6.8). */
+  INSIGHT_RSS_FEEDS: z.string().optional(),
 
   /** AgentRegistry on Base. Read-only: the worker warns about active agents that are not registered onchain. */
   REGISTRY_ADDRESS: address.optional(),

@@ -56,6 +56,14 @@ export interface BudgetSource {
   markCritical(agentId: string, reason: string): void;
 }
 
+/**
+ * Refreshes an agent's insight digest when it is stale (PRD 6.8). The tick calls this before reading the
+ * digest. A failure is logged by the tick and never stops the decision.
+ */
+export interface InsightRefresher {
+  refreshIfStale(agent: Agent): Promise<void>;
+}
+
 export interface Deps {
   db: Db;
   clock: Clock;
@@ -80,6 +88,8 @@ export interface Deps {
    * The tick uses this when it is set. Omitted in tests, where routerFor is used directly.
    */
   agentRouterFor?(agent: Agent): Promise<ZeroGRouter>;
+  /** Insight digest refresh before a tick. Omitted in tests and when no insight producer is wired. */
+  insights?: InsightRefresher | null;
   /** Ids for episodes, requests and orders. Defaults to randomUUID. */
   newId?: () => string;
 }

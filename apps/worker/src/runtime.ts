@@ -19,9 +19,12 @@ import { registryReader, type RegistrationReader } from "./registry.ts";
 import { LocalWalletProvider, PrivyWalletProvider, type WalletProvider } from "./wallets.ts";
 import { systemClock, type Clock, type Deps } from "./deps.ts";
 import type { ReflectionDeps } from "./reflection.ts";
-import { getAgentZgKey, type ProvisionDeps, type RegistryWriter } from "./provisioner.ts";
+import type { ProvisionDeps, RegistryWriter } from "./provisioner.ts";
 import { createViemAllowanceWriter, createViemRegistryWriter } from "./provisioner-chain.ts";
 import { parseEncryptionKey } from "./secrets.ts";
+import { createAgentRouterFor } from "./inference-router.ts";
+import { createInsightProducer, type InsightProducer } from "./insights/producer.ts";
+import { parseFeedList, RssCollector } from "./insights/sources.ts";
 
 export interface Runtime {
   env: WorkerEnv;
@@ -37,6 +40,8 @@ export interface Runtime {
   perf: PerfChain | null;
   /** Flash REST client, or null when DEFINITIVE_API_KEY is not set. */
   flash: FlashClient | null;
+  /** Insight digests (PRD 6.8): the 15-min cycle, and the refresh a tick calls when a digest is stale. */
+  insights: InsightProducer;
   reflectionDeps(): ReflectionDeps;
   relayerOptions(): RelayerOptions;
   /** Dependencies for provisioning (wallets, 0G keys, registry, allowance). */
@@ -110,16 +115,12 @@ export function createRuntime(env: WorkerEnv, overrides: RuntimeOverrides = {}):
 
   // Per-agent 0G keys (provisioning step c). The router is rebuilt when an agent's stored key changes.
   const encryptionKey = env.AGENT_KEY_ENCRYPTION_KEY ? parseEncryptionKey(env.AGENT_KEY_ENCRYPTION_KEY) : null;
-  const agentRouters = new Map<string, { key: string; router: ZeroGRouter }>();
-  const agentRouterFor = async (agent: Agent): Promise<ZeroGRouter> => {
-    const key = await getAgentZgKey({ db, encryptionKey }, agent.id);
-    if (!key) return routerFor();
-    const cached = agentRouters.get(agent.id);
-    if (cached && cached.key === key) return cached.router;
-    const agentRouter = new ZeroGRouter({ apiKey: key, baseUrl: zgBaseUrl, payer: "agent" });
-    agentRouters.set(agent.id, { key, router: agentRouter });
-    return agentRouter;
-  };
+  const agentRouterFor = createAgentRouterFor({
+    db,
+    encryptionKey,
+    platformRouter: routerFor,
+    agentRouter: (apiKey) => new ZeroGRouter({ apiKey, baseUrl: zgBaseUrl, payer: "agent" }),
+  });
 
   const memory: MemoryStore =
     env.ZG_STORAGE_INDEXER && env.ZG_RPC_URL && env.ZG_PRIVATE_KEY
@@ -161,6 +162,9 @@ export function createRuntime(env: WorkerEnv, overrides: RuntimeOverrides = {}):
   const usdc = chain.tokens.USDC?.address;
   const allowanceWriter = usdc ? createViemAllowanceWriter({ chain, usdc }) : null;
 
+  const rss = new RssCollector({ feeds: parseFeedList(env.INSIGHT_RSS_FEEDS), clock, logger });
+  const insights = createInsightProducer({ db, clock, logger, budget, agentRouterFor, rss });
+
   const deps: Deps = {
     db,
     clock,
@@ -174,6 +178,7 @@ export function createRuntime(env: WorkerEnv, overrides: RuntimeOverrides = {}):
     executor,
     routerFor,
     agentRouterFor,
+    insights,
     // Flash cancel and PATCH need signed messages that this repo does not define yet (see crash.ts). Until
     // an implementation is supplied, live cancels and stop changes fail with a recorded error.
     orderControl: null,
@@ -191,6 +196,7 @@ export function createRuntime(env: WorkerEnv, overrides: RuntimeOverrides = {}):
     perf,
     registry,
     flash,
+    insights,
 
     provisionDeps: () => ({
       db,
@@ -211,6 +217,7 @@ export function createRuntime(env: WorkerEnv, overrides: RuntimeOverrides = {}):
       logger,
       memory,
       routerFor,
+      agentRouterFor,
       globalLimits: deps.globalLimits,
       commissionBounds: { min: env.COMMISSION_BPS_MIN, max: env.COMMISSION_BPS_MAX },
     }),

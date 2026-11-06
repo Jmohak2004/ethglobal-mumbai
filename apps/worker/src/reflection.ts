@@ -31,6 +31,8 @@ export interface ReflectionDeps {
   logger?: Logger;
   memory: MemoryStore;
   routerFor: (agent: Agent) => ZeroGRouter;
+  /** Per-agent router (the agent's own 0G key when stored, payer "agent"). Used when set, else routerFor. */
+  agentRouterFor?: (agent: Agent) => Promise<ZeroGRouter>;
   globalLimits: GlobalLimits;
   commissionBounds: { min: number; max: number };
 }
@@ -160,7 +162,8 @@ export async function reflectAgent(deps: ReflectionDeps, agent: Agent, budget: B
     const closedTrades = closedTradesFrom(state.trades.slice(-MAX_TRADES_FOR_REFLECTION));
     const existingLessons = await topForAgent(deps.db, agent.id, { k: 10 });
 
-    const res = await reflect(deps.routerFor(agent), {
+    const router = deps.agentRouterFor ? await deps.agentRouterFor(agent) : deps.routerFor(agent);
+    const res = await reflect(router, {
       agentId: agent.id,
       agentName: agent.name,
       episodes,

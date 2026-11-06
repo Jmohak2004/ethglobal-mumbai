@@ -211,6 +211,15 @@ export async function runTick(deps: Deps, agent: Agent): Promise<TickResult> {
       return finish(hold(`budget tier empty (${budget.source}): LLM skipped, no new entries`), {});
     }
 
+    // PRD 6.8: a digest older than 30 min is refreshed before the decision. A failed refresh keeps the last digest.
+    if (deps.insights) {
+      try {
+        await deps.insights.refreshIfStale(agent);
+      } catch (err) {
+        log.warn("insight refresh failed; deciding on the last digest", { error: err });
+      }
+    }
+
     const lessons = await topForAgent(deps.db, agent.id, { k: LESSON_LIMIT });
     const insights = await latestInsight(deps.db, agent.id, agent.config.assets);
     const state = await loadAgentState(deps.db, agent, now);

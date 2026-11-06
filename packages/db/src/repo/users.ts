@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import type { Db } from "../client.ts";
 import { users } from "../schema.ts";
 import { addr } from "./util.ts";
@@ -51,6 +51,16 @@ export async function upsertUser(db: Db, input: UpsertUserInput): Promise<UserRe
 export async function getUser(db: Db, address: string): Promise<UserRecord | null> {
   const [row] = await db.select().from(users).where(eq(users.address, addr(address))).limit(1);
   return row ? toUser(row) : null;
+}
+
+/** Users who opted in to the Humans board (PRD 6.13), oldest first. */
+export async function listHumansOptedIn(db: Db): Promise<UserRecord[]> {
+  const rows = await db
+    .select()
+    .from(users)
+    .where(eq(users.humansBoardOptIn, true))
+    .orderBy(asc(users.createdAt), asc(users.address));
+  return rows.map(toUser);
 }
 
 function toUser(row: typeof users.$inferSelect): UserRecord {

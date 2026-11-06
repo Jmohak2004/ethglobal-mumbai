@@ -1,8 +1,10 @@
 #!/usr/bin/env bun
 // Worker CLI.
-//   bun src/index.ts run                 migrate, then scheduler, provisioning, forecast resolver, crash guard, stats/attestation sync, treasury loops
+//   bun src/index.ts run                 migrate, then scheduler, provisioning, forecast resolver, crash guard, stats/attestation sync,
+//                                        treasury, insight digests (15 min), humans board sync (5 min), reflection loops
 //   bun src/index.ts relayer             poll TopUpRequested and deposit 0G through the Payment Layer
 //   bun src/index.ts tick <agentId>      one decision tick; prints the episode JSON
+//   bun src/index.ts insights <agentId>  one insight cycle for one agent; prints the run and its digest
 //   bun src/index.ts provision <agentId> run every provisioning step now (ignores backoff); prints the result
 //   bun src/index.ts seed-demo           two paper demo agents, only when the database has no agents
 
@@ -19,6 +21,8 @@ import { reflectAgent } from "./reflection.ts";
 import { runRelayerOnce } from "./economics/relayer.ts";
 import { seedDemoAgents } from "./seed.ts";
 import { provisionAgent, provisionPass } from "./provisioner.ts";
+import { syncHumans } from "./humans.ts";
+import { INSIGHT_CYCLE_MS } from "./insights/producer.ts";
 import type { Agent } from "@arena/shared";
 
 const FORECAST_EVERY_MS = 60_000;
@@ -27,12 +31,14 @@ const RISK_CHECK_EVERY_MS = 30_000;
 const ATTEST_EVERY_MS = 15 * 60_000;
 const TREASURY_EVERY_MS = 15 * 60_000;
 const REFLECT_CHECK_EVERY_MS = 10 * 60_000;
+const HUMANS_EVERY_MS = 5 * 60_000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 const USAGE = `usage: bun src/index.ts <command>
   run                 migrate, then start the scheduler and background loops
   relayer             poll TopUpRequested and deposit 0G
   tick <agentId>      run one decision tick and print the episode JSON
+  insights <agentId>  run one insight cycle for one agent and print the digest
   provision <agentId> run every provisioning step for one agent now and print the result
   seed-demo           create two paper demo agents when the database is empty`;
 
@@ -99,6 +105,32 @@ async function cmdRun(env: WorkerEnv): Promise<void> {
   };
   const crash = createCrashGuard({ deps: rt.deps, loadAgents: () => loadAgents(db) });
   const reflectLastRun = new Map<string, number>();
+  // Insight digests (PRD 6.8). A cycle never overlaps the one before it, since each digest is a paid 0G call.
+  let insightCycleRunning = false;
+  const insightCycle = async () => {
+    if (insightCycleRunning) return;
+    insightCycleRunning = true;
+    try {
+      const runs = await rt.insights.runCycle(await loadAgents(db));
+      const outcomes = runs.reduce<Record<string, number>>((acc, r) => ({ ...acc, [r.outcome]: (acc[r.outcome] ?? 0) + 1 }), {});
+      if (runs.length > 0) log.info("insight cycle", { agents: runs.length, outcomes });
+    } finally {
+      insightCycleRunning = false;
+    }
+  };
+  // Humans board (PRD 6.13). Needs the Flash client, so it is off when DEFINITIVE_API_KEY is not set.
+  let humansRunning = false;
+  const humans = async () => {
+    if (!rt.flash || humansRunning) return;
+    humansRunning = true;
+    try {
+      const result = await syncHumans({ db, flash: rt.flash, clock, logger: log });
+      if (result.users > 0) log.info("humans board synced", { ...result });
+    } finally {
+      humansRunning = false;
+    }
+  };
+  if (!rt.flash) log.warn("humans board sync disabled: DEFINITIVE_API_KEY is not set", {});
   // Provisioning passes can outlast the interval (RPC calls), so a pass never starts while one is running.
   let provisioning = false;
   const provision = async () => {
@@ -119,12 +151,16 @@ async function cmdRun(env: WorkerEnv): Promise<void> {
     setInterval(() => void attest().catch((e) => log.error("stats or attestation sync failed", { error: e })), ATTEST_EVERY_MS),
     setInterval(() => void treasurySweep(rt).catch((e) => log.error("treasury sweep failed", { error: e })), TREASURY_EVERY_MS),
     setInterval(() => void dailyReflections(rt, reflectLastRun).catch((e) => log.error("daily reflection failed", { error: e })), REFLECT_CHECK_EVERY_MS),
+    setInterval(() => void insightCycle().catch((e) => log.error("insight cycle failed", { error: e })), INSIGHT_CYCLE_MS),
+    setInterval(() => void humans().catch((e) => log.error("humans board sync failed", { error: e })), HUMANS_EVERY_MS),
   ];
   // Kick the slow loops off once at startup.
   void provision().catch((e) => log.error("provisioning pass failed", { error: e }));
   void poll().catch((e) => log.error("forecast or order poll failed", { error: e }));
   void crash.check().catch((e) => log.error("crash guard failed", { error: e }));
   void attest().catch((e) => log.error("stats or attestation sync failed", { error: e }));
+  void insightCycle().catch((e) => log.error("insight cycle failed", { error: e }));
+  void humans().catch((e) => log.error("humans board sync failed", { error: e }));
 
   log.info("worker running", { maxConcurrency: env.WORKER_MAX_CONCURRENCY, executionMode: env.EXECUTION_MODE, chain: rt.chain.name });
 
@@ -151,6 +187,26 @@ async function treasurySweep(rt: Runtime): Promise<void> {
       rt.logger.error("commission collection failed", { agent: agent.id, error: err });
     }
   }
+}
+
+/** One insight cycle for one agent, ignoring the digest's age. Prints the run (with the digest). Exit 1 when it failed. */
+async function cmdInsights(env: WorkerEnv, agentId: string | undefined): Promise<number> {
+  if (!agentId) {
+    console.error(USAGE);
+    return 2;
+  }
+  const rt = createRuntime(env);
+  await migrate(rt.db);
+  const agent = await getAgent(rt.db, agentId);
+  if (!agent) {
+    console.error(`no agent with id ${agentId}`);
+    await rt.close();
+    return 1;
+  }
+  const run = await rt.insights.produce(agent);
+  console.log(JSON.stringify(run, null, 2));
+  await rt.close();
+  return run.outcome === "failed" ? 1 : 0;
 }
 
 async function cmdRelayer(env: WorkerEnv): Promise<void> {
@@ -241,6 +297,8 @@ async function main(): Promise<number> {
       return 0;
     case "tick":
       return cmdTick(env, args[0]);
+    case "insights":
+      return cmdInsights(env, args[0]);
     case "provision":
       return cmdProvision(env, args[0]);
     case "seed-demo":

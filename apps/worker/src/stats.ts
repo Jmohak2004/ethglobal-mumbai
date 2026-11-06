@@ -237,6 +237,24 @@ export async function syncAttestations(opts: SyncAttestationsOptions): Promise<n
 }
 
 /**
+ * Fill rows for one order, from its GET /orders/{id} detail. Ids are deterministic (order, tx, index), so the same
+ * detail always yields the same rows and re-inserting is harmless.
+ */
+export function fillRecordsFromDetail(orderId: string, detail: FlashGetOrderResponse): FillRecord[] {
+  return normalizeFills({ order: detail.order, fills: detail.fills }).map((t, i) => ({
+    id: `${orderId}:${t.txId || "no-tx"}:${i}`,
+    orderId,
+    price: t.price,
+    qty: t.qty,
+    notionalUsd: t.notionalUsd,
+    feeUsd: t.feeUsd,
+    integratorFeeUsd: t.integratorFeeUsd,
+    txId: t.txId || null,
+    ts: t.ts,
+  }));
+}
+
+/**
  * Polls Flash for orders that are still open (status "submitted" from our own write, or a non-terminal Flash
  * status), and stores their fills and new status. Fill ids are deterministic, so re-polling is harmless.
  * Returns the number of orders polled and the number of fills inserted. Live orders only: paper fills are
@@ -257,18 +275,7 @@ export async function syncOrderFills(opts: {
   for (const o of open) {
     try {
       const detail: FlashGetOrderResponse = await opts.flash.getOrder(o.id, o.funderAddress);
-      const trades = normalizeFills({ order: detail.order, fills: detail.fills });
-      const fills: FillRecord[] = trades.map((t, i) => ({
-        id: `${o.id}:${t.txId || "no-tx"}:${i}`,
-        orderId: o.id,
-        price: t.price,
-        qty: t.qty,
-        notionalUsd: t.notionalUsd,
-        feeUsd: t.feeUsd,
-        integratorFeeUsd: t.integratorFeeUsd,
-        txId: t.txId || null,
-        ts: t.ts,
-      }));
+      const fills = fillRecordsFromDetail(o.id, detail);
       await insertFills(opts.db, fills);
       fillsInserted += fills.length;
       await upsertOrder(opts.db, {
