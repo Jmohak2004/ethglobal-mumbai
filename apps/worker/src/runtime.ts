@@ -15,6 +15,7 @@ import { createLogger, type Logger } from "./logger.ts";
 import { createPerfChain, type PerfChain } from "./stats.ts";
 import { createTreasury, treasuryChainFromEnv, type Treasury } from "./economics/treasury.ts";
 import { coingeckoZgUsd, createViemRelayerChain, fileCursorStore, type RelayerOptions } from "./economics/relayer.ts";
+import { registryReader, type RegistrationReader } from "./registry.ts";
 import { LocalWalletProvider, PrivyWalletProvider, type WalletProvider } from "./wallets.ts";
 import { systemClock, type Clock, type Deps } from "./deps.ts";
 import type { ReflectionDeps } from "./reflection.ts";
@@ -28,6 +29,8 @@ export interface Runtime {
   deps: Deps;
   treasury: Treasury;
   memory: MemoryStore;
+  /** AgentRegistry.exists reader, or null when REGISTRY_ADDRESS is not set. */
+  registry: RegistrationReader | null;
   perf: PerfChain | null;
   /** Flash REST client, or null when DEFINITIVE_API_KEY is not set. */
   flash: FlashClient | null;
@@ -118,8 +121,14 @@ export function createRuntime(env: WorkerEnv, overrides: RuntimeOverrides = {}):
   });
 
   const perf = env.PERF_REGISTRY_ADDRESS
-    ? createPerfChain({ client, address: env.PERF_REGISTRY_ADDRESS as Hex, fromBlock: BigInt(env.PERF_REGISTRY_FROM_BLOCK) })
+    ? createPerfChain({
+        client,
+        address: env.PERF_REGISTRY_ADDRESS as Hex,
+        fromBlock: BigInt(env.PERF_REGISTRY_FROM_BLOCK),
+        chunkBlocks: env.LOG_CHUNK_BLOCKS,
+      })
     : null;
+  const registry = env.REGISTRY_ADDRESS ? registryReader(client, env.REGISTRY_ADDRESS as Hex) : null;
 
   const deps: Deps = {
     db,
@@ -133,6 +142,9 @@ export function createRuntime(env: WorkerEnv, overrides: RuntimeOverrides = {}):
     wallets,
     executor,
     routerFor,
+    // Flash cancel and PATCH need signed messages that this repo does not define yet (see crash.ts). Until
+    // an implementation is supplied, live cancels and stop changes fail with a recorded error.
+    orderControl: null,
   };
 
   return {
@@ -145,6 +157,7 @@ export function createRuntime(env: WorkerEnv, overrides: RuntimeOverrides = {}):
     treasury,
     memory,
     perf,
+    registry,
     flash,
 
     reflectionDeps: () => ({

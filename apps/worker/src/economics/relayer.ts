@@ -1,9 +1,9 @@
 // Conversion relayer (PRD 6.11.4). Watches AgentTreasury.TopUpRequested on Base, converts the USDC amount
 // to 0G at the market rate minus a spread, and deposits it to the agent's 0G wallet through the 0G
-// Payment Layer (depositFor). Each request is handled once: the top-up row id is derived from
-// (agent, nonce), and a deposited row is never sent again.
+// Payment Layer (depositFor). Each request is handled once: the top-up is keyed by (agent, nonce) in the
+// database (topups.nonce, unique per agent), and a deposited row is never sent again.
 
-import { createTopup, insertTreasuryEvent, updateTopup, type Db } from "@arena/db";
+import { createTopupIfAbsent, getTopupByNonce, insertTreasuryEvent, updateTopup, type Db } from "@arena/db";
 import { agentIdToBytes32, fromUsd6, type Agent } from "@arena/shared";
 import { depositToPaymentLayer, type DepositOptions, type DepositResult } from "@arena/zerog";
 import { parseEther, type Hex, type PublicClient } from "viem";
@@ -12,7 +12,7 @@ import { AGENT_TREASURY_ABI } from "../abi.ts";
 import type { Clock } from "../deps.ts";
 import type { Logger } from "../logger.ts";
 import { silentLogger } from "../logger.ts";
-import { findTopup, topupIdFor } from "./treasury.ts";
+import { topupIdFor } from "./treasury.ts";
 
 export const COINGECKO_ZG_URL = "https://api.coingecko.com/api/v3/simple/price?ids=zero-gravity&vs_currencies=usd";
 const MAX_BLOCKS_PER_QUERY = 2_000n;
@@ -130,10 +130,11 @@ export async function processTopUpRequest(
 ): Promise<RequestOutcome> {
   const logger = (opts.logger ?? silentLogger).child({ agent: agent.id, nonce: req.nonce.toString() });
   const id = topupIdFor(agent.id, req.nonce);
-  const existing = await findTopup(opts.db, agent.id, id);
+  const existing = await getTopupByNonce(opts.db, agent.id, req.nonce);
+  const rowId = existing?.id ?? id;
   if (existing?.status === "deposited") return "skipped";
   if (existing?.status === "relaying") {
-    logger.warn("top-up already in flight or interrupted; needs manual review", { topup: id });
+    logger.warn("top-up already in flight or interrupted; needs manual review", { topup: existing.id });
     return "skipped";
   }
   if (!agent.zgWallet) {
@@ -143,20 +144,24 @@ export async function processTopUpRequest(
 
   const usd = fromUsd6(req.amountUsd6);
   const now = opts.clock.now();
+  /** Moves this nonce's row to a status, creating it first when the treasury has not recorded it yet. */
   const markRow = async (status: string, depositTx?: string | null) => {
-    if (existing) await updateTopup(opts.db, id, { status, ...(depositTx !== undefined ? { depositTx } : {}) });
-    else
-      await createTopup(opts.db, {
-        id,
-        agentId: agent.id,
-        usdcAmount: usd,
-        baseTx: req.txHash,
-        zgTransferTx: null,
-        depositTx: depositTx ?? null,
-        firstPaidRequestId: null,
-        status,
-        ts: now,
-      });
+    const patch = { status, ...(depositTx !== undefined ? { depositTx } : {}) };
+    if (existing) {
+      await updateTopup(opts.db, existing.id, patch);
+      return;
+    }
+    const { topup, created } = await createTopupIfAbsent(opts.db, {
+      id,
+      agentId: agent.id,
+      nonce: req.nonce,
+      usdcAmount: usd,
+      baseTx: req.txHash,
+      depositTx: depositTx ?? null,
+      status,
+      ts: now,
+    });
+    if (!created) await updateTopup(opts.db, topup.id, patch);
   };
 
   if (usd > opts.maxRequestUsd) {
@@ -184,7 +189,7 @@ export async function processTopUpRequest(
   try {
     const deposit = opts.deposit ?? depositToPaymentLayer;
     const res = await deposit({ rpcUrl: opts.zg.rpcUrl, privateKey: opts.zg.privateKey, network: opts.zg.network, amountWei, recipient: agent.zgWallet });
-    await updateTopup(opts.db, id, { status: "deposited", depositTx: res.txHash });
+    await updateTopup(opts.db, rowId, { status: "deposited", depositTx: res.txHash });
     await insertTreasuryEvent(opts.db, {
       agentId: agent.id,
       kind: "relayer_deposit",
@@ -196,8 +201,8 @@ export async function processTopUpRequest(
     logger.info("top-up deposited to 0G", { usd, zgAmountWei: amountWei.toString(), depositTx: res.txHash });
     return "deposited";
   } catch (err) {
-    logger.error("0G deposit failed", { topup: id, error: err });
-    await updateTopup(opts.db, id, { status: "failed" });
+    logger.error("0G deposit failed", { topup: rowId, error: err });
+    await updateTopup(opts.db, rowId, { status: "failed" });
     return "failed";
   }
 }

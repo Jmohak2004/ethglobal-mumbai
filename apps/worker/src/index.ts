@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 // Worker CLI.
-//   bun src/index.ts run              migrate, then scheduler, forecast resolver, stats/attestation sync, treasury loops
+//   bun src/index.ts run              migrate, then scheduler, forecast resolver, crash guard, stats/attestation sync, treasury loops
 //   bun src/index.ts relayer          poll TopUpRequested and deposit 0G through the Payment Layer
 //   bun src/index.ts tick <agentId>   one decision tick; prints the episode JSON
 //   bun src/index.ts seed-demo        two paper demo agents, only when the database has no agents
@@ -11,13 +11,16 @@ import { createRuntime, loadAgents, type Runtime } from "./runtime.ts";
 import { Scheduler } from "./scheduler.ts";
 import { runTick, type TickResult } from "./tick.ts";
 import { resolveDueForecasts } from "./forecasts.ts";
-import { recomputeStats, syncAttestations, syncOrderFills } from "./stats.ts";
+import { createCrashGuard } from "./crash.ts";
+import { dbBlockCursor, recomputeStats, syncAttestations, syncOrderFills } from "./stats.ts";
+import { checkRegistrations } from "./registry.ts";
 import { reflectAgent } from "./reflection.ts";
 import { runRelayerOnce } from "./economics/relayer.ts";
 import { seedDemoAgents } from "./seed.ts";
 import type { Agent } from "@arena/shared";
 
 const FORECAST_EVERY_MS = 60_000;
+const RISK_CHECK_EVERY_MS = 30_000;
 const ATTEST_EVERY_MS = 15 * 60_000;
 const TREASURY_EVERY_MS = 15 * 60_000;
 const REFLECT_CHECK_EVERY_MS = 10 * 60_000;
@@ -73,22 +76,35 @@ async function cmdRun(env: WorkerEnv): Promise<void> {
 
   const attest = async () => {
     await recomputeStats({ db, clock, logger: log });
-    if (rt.perf) await syncAttestations({ db, perf: rt.perf, logger: log });
+    if (rt.perf) {
+      await syncAttestations({
+        db,
+        perf: rt.perf,
+        logger: log,
+        cursor: dbBlockCursor(db, "perf_reports"),
+        fromBlock: BigInt(env.PERF_REGISTRY_FROM_BLOCK),
+        chunkBlocks: env.LOG_CHUNK_BLOCKS,
+      });
+    }
+    if (rt.registry) await checkRegistrations(await loadAgents(db), rt.registry, log);
   };
   /** Forecast scoring and live order fills, both on the minute. */
   const poll = async () => {
     await resolveDueForecasts({ db, market, clock, logger: log });
     if (rt.flash) await syncOrderFills({ db, flash: rt.flash, clock, logger: log });
   };
+  const crash = createCrashGuard({ deps: rt.deps, loadAgents: () => loadAgents(db) });
   const reflectLastRun = new Map<string, number>();
   const timers: ReturnType<typeof setInterval>[] = [
     setInterval(() => void poll().catch((e) => log.error("forecast or order poll failed", { error: e })), FORECAST_EVERY_MS),
+    setInterval(() => void crash.check().catch((e) => log.error("crash guard failed", { error: e })), RISK_CHECK_EVERY_MS),
     setInterval(() => void attest().catch((e) => log.error("stats or attestation sync failed", { error: e })), ATTEST_EVERY_MS),
     setInterval(() => void treasurySweep(rt).catch((e) => log.error("treasury sweep failed", { error: e })), TREASURY_EVERY_MS),
     setInterval(() => void dailyReflections(rt, reflectLastRun).catch((e) => log.error("daily reflection failed", { error: e })), REFLECT_CHECK_EVERY_MS),
   ];
   // Kick the slow loops off once at startup.
   void poll().catch((e) => log.error("forecast or order poll failed", { error: e }));
+  void crash.check().catch((e) => log.error("crash guard failed", { error: e }));
   void attest().catch((e) => log.error("stats or attestation sync failed", { error: e }));
 
   log.info("worker running", { maxConcurrency: env.WORKER_MAX_CONCURRENCY, executionMode: env.EXECUTION_MODE, chain: rt.chain.name });

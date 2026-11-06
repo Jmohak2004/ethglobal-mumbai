@@ -21,8 +21,24 @@ export interface MarketData {
   getPrice(asset: string): Promise<number>;
 }
 
+/** The platform risk level and the time of the report that set it (unix ms, or null when unknown). */
+export interface RiskReading {
+  level: RiskLevel;
+  asOf: number | null;
+}
+
 export interface RiskSource {
   current(): Promise<RiskLevel>;
+  reading(): Promise<RiskReading>;
+}
+
+/**
+ * Order management on Flash for live orders: cancel an open order, and move the stop-loss attached to an
+ * open order. Each call must be signed by the agent's wallet, so the implementation owns the signing.
+ */
+export interface EntryOrderControl {
+  cancelOrder(orderId: string, funderAddress: string): Promise<void>;
+  setStopLoss(orderId: string, funderAddress: string, stopLossPrice: number): Promise<void>;
 }
 
 export interface BudgetReading {
@@ -52,6 +68,11 @@ export interface Deps {
   budget: BudgetSource;
   wallets: WalletProvider;
   executor: Pick<FlashExecutor, "execute">;
+  /**
+   * Live order management (cancel, stop-loss). Null or omitted when Flash signing for these calls is not
+   * configured: live cancel and stop steps then record an error on their episode instead of acting.
+   */
+  orderControl?: EntryOrderControl | null;
   /** Returns the inference router for an agent. Throws when no decision key is configured. */
   routerFor(agent: Agent): ZeroGRouter;
   /** Ids for episodes, requests and orders. Defaults to randomUUID. */

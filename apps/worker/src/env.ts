@@ -25,17 +25,18 @@ export const WorkerEnvSchema = EnvSchema.extend({
   /** Assumed 0G credit per agent when no management key is set (estimate = seed − billed). */
   AGENT_SEED_CREDIT_0G: num(1),
 
+  /** AgentRegistry on Base. Read-only: the worker warns about active agents that are not registered onchain. */
   REGISTRY_ADDRESS: address.optional(),
   TREASURY_ADDRESS: address.optional(),
   PERF_REGISTRY_ADDRESS: address.optional(),
   RISK_ORACLE_ADDRESS: address.optional(),
-  /** First block to scan for PerformanceReported logs. */
+  /** First block to scan for PerformanceReported logs (used when no scan cursor is stored yet). */
   PERF_REGISTRY_FROM_BLOCK: z.coerce.number().int().nonnegative().default(0),
+  /** Blocks per eth_getLogs call when scanning PerformanceReported logs. Keeps each call under RPC range limits. */
+  LOG_CHUNK_BLOCKS: z.coerce.number().int().positive().default(2000),
 
   /** Operator key: calls AgentTreasury.topUp and collectCommission. */
   OPERATOR_PRIVATE_KEY: privateKey.optional(),
-  /** Relayer key on Base: the relayer side of the treasury flow (reserved, not used for signing yet). */
-  RELAYER_PRIVATE_KEY: privateKey.optional(),
   /** Key on the 0G chain that pays for Payment Layer deposits. */
   RELAYER_ZG_PRIVATE_KEY: privateKey.optional(),
   /** Per-request guard: a TopUpRequested above this many USDC is not converted. */

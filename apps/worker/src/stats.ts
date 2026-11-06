@@ -1,13 +1,15 @@
 // Leaderboard stats and onchain verification.
 //   recomputeStats:      FIFO PnL, volume, win rate, drawdown and forecast hit rate per agent, from our fills.
-//                        Writes unverified rows, but keeps any verification a previous sync recorded.
-//   syncAttestations:    reads PerformanceRegistry.getPerformance per agent and the latest
-//                        PerformanceReported log, then marks the stats row verified with that tx.
+//                        Leaves the stored verification alone (upsertStats keeps fields it is not given).
+//   syncAttestations:    reads PerformanceReported logs and marks each agent's stats row verified with the
+//                        latest report tx. With a cursor, logs are scanned in chunks from the persisted block.
 
 import {
+  getChainCursor,
   insertAttestation,
   insertFills,
-  leaderboard,
+  markStatsVerified,
+  setChainCursor,
   upsertOrder,
   upsertStats,
   type Db,
@@ -18,13 +20,14 @@ import { computeFifoPnl, normalizeFills, OPEN_ORDER_STATUSES, type FlashClient, 
 import { agentIdToBytes32, type ExecutionMode, type FlashOrderType, type OrderIntent, type TemplateId } from "@arena/shared";
 import type { Hex, PublicClient } from "viem";
 import { PERFORMANCE_REGISTRY_ABI } from "./abi.ts";
+import type { CursorStore } from "./economics/relayer.ts";
 import type { Clock } from "./deps.ts";
 import type { Logger } from "./logger.ts";
 import { silentLogger } from "./logger.ts";
-import { tradesFrom } from "./tick.ts";
+import { tradesFrom } from "./execution.ts";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const STATS_LIMIT = 500;
+export const DEFAULT_LOG_CHUNK_BLOCKS = 2000;
 
 export interface PerfReading {
   asOf: bigint;
@@ -38,17 +41,29 @@ export interface PerfReading {
   commissionOwedCumulativeUsd6: bigint;
 }
 
+export interface ReportLog {
+  agentIdBytes32: Hex;
+  txHash: Hex;
+  blockNumber: bigint;
+}
+
 /** The PerformanceRegistry reads the attestor needs. Injected so the sync can be tested without a chain. */
 export interface PerfChain {
-  /** Null when the agent has never been reported (asOf == 0). */
   getPerformance(agentIdBytes32: Hex): Promise<PerfReading | null>;
   /** The most recent PerformanceReported log for this agent. */
   latestReport(agentIdBytes32: Hex): Promise<{ txHash: Hex; blockNumber: bigint | null } | null>;
+  /** PerformanceReported logs in [fromBlock, toBlock], inclusive, oldest first. Required for the cursor sync. */
+  reportLogs?(fromBlock: bigint, toBlock: bigint): Promise<ReportLog[]>;
+  /** Chain head. Required for the cursor sync. */
+  latestBlock?(): Promise<bigint>;
 }
 
 const round = (n: number) => Math.round(n);
 
-/** Recomputes every agent's stats from fills and forecasts. Returns the number of rows written. */
+/**
+ * Recomputes every agent's stats from fills and forecasts. Returns the number of rows written.
+ * Verification and self-funded flags are not passed, so the stored values stay as they are.
+ */
 export async function recomputeStats(opts: { db: Db; clock: Clock; logger?: Logger }): Promise<number> {
   const { db } = opts;
   const now = opts.clock.now();
@@ -68,7 +83,6 @@ export async function recomputeStats(opts: { db: Db; clock: Clock; logger?: Logg
     const hits = resolved.filter((f) => f.hit === true).length;
     const closing = fifo.wins + fifo.losses;
 
-    const existing = await db.query.agentStats.findFirst({ where: (s, { eq }) => eq(s.entityId, a.id) });
     rows.push({
       entityId: a.id,
       kind: "agent",
@@ -83,11 +97,6 @@ export async function recomputeStats(opts: { db: Db; clock: Clock; logger?: Logg
       maxDrawdownBps: round(fifo.maxDrawdownPct * 100),
       forecastHitRateBps: resolved.length > 0 ? round((hits / resolved.length) * 10_000) : 0,
       daysActive: Math.max(0, Math.floor((now - a.createdAt) / DAY_MS)),
-      verified:
-        existing?.verifiedTx && existing.verifiedAsOf !== null
-          ? { reportTx: existing.verifiedTx as Hex, asOf: existing.verifiedAsOf }
-          : null,
-      selfFunded: existing?.selfFunded ?? false,
       updatedAt: now,
     });
   }
@@ -103,78 +112,125 @@ export function toUnixMs(asOf: bigint): number {
   return n < 1e12 ? n * 1000 : n;
 }
 
-/**
- * Verifies stats against PerformanceRegistry. For each agent with a report, stores the attestation and
- * marks the stats row verified with the latest PerformanceReported tx. Returns the number verified.
- */
-export async function syncAttestations(opts: {
+/** Block cursor kept in the chain_cursors table. The name identifies the scanner. */
+export function dbBlockCursor(db: Db, name: string): CursorStore {
+  return {
+    async read() {
+      const block = await getChainCursor(db, name);
+      return block === null ? null : BigInt(block);
+    },
+    async write(block) {
+      await setChainCursor(db, name, Number(block));
+    },
+  };
+}
+
+export interface SyncAttestationsOptions {
   db: Db;
   perf: PerfChain;
   logger?: Logger;
-}): Promise<number> {
+  /** When set, PerformanceReported logs are scanned in chunks from this cursor (the last processed block). */
+  cursor?: CursorStore;
+  /** First block to scan when the cursor has no value yet. Default 0. */
+  fromBlock?: bigint;
+  /** Blocks per log query (LOG_CHUNK_BLOCKS). Default 2000. */
+  chunkBlocks?: number;
+}
+
+/**
+ * Records the attestation for one agent's current PerformanceRegistry reading and marks its stats row
+ * verified with the given report tx. Returns true when the stats row was marked.
+ */
+async function verifyAgent(
+  opts: SyncAttestationsOptions,
+  agentId: string,
+  bytes: Hex,
+  latest: { txHash: Hex },
+  logger: Logger,
+): Promise<boolean> {
+  const reading = await opts.perf.getPerformance(bytes);
+  if (!reading) return false;
+  const asOf = toUnixMs(reading.asOf);
+
+  // One attestation per report tx, so the stored tx always matches the report it was recorded from.
+  await insertAttestation(opts.db, {
+    id: `perf:${agentId}:${latest.txHash}`,
+    kind: "perf",
+    txHash: latest.txHash,
+    asOf,
+    payload: {
+      agentId,
+      agentIdBytes32: bytes,
+      asOf: reading.asOf.toString(),
+      realizedPnlUsd6: reading.realizedPnlUsd6.toString(),
+      volumeUsd6: reading.volumeUsd6.toString(),
+      trades: reading.trades,
+      winRateBps: reading.winRateBps,
+      maxDrawdownBps: reading.maxDrawdownBps,
+      forecastHitRateBps: reading.forecastHitRateBps,
+      hwmUsd6: reading.hwmUsd6.toString(),
+      commissionOwedCumulativeUsd6: reading.commissionOwedCumulativeUsd6.toString(),
+    },
+  });
+
+  const marked = await markStatsVerified(opts.db, agentId, { reportTx: latest.txHash, asOf });
+  if (!marked) {
+    logger.warn("attested agent has no stats row yet; run recomputeStats first", { agent: agentId });
+  }
+  return marked;
+}
+
+/**
+ * Verifies stats against PerformanceRegistry. With a cursor, PerformanceReported logs are read in chunks of
+ * chunkBlocks from the stored block up to the head. Each chunk's agents are verified before the cursor moves
+ * past it, so a crash never skips a report. Without a cursor, each agent is checked with latestReport.
+ * Returns the number of stats rows verified.
+ */
+export async function syncAttestations(opts: SyncAttestationsOptions): Promise<number> {
   const logger = opts.logger ?? silentLogger;
   const agentRows = await opts.db.query.agents.findMany({ columns: { id: true } });
-  const board = await leaderboard(opts.db, { kind: "agent", limit: STATS_LIMIT });
-  const statsById = new Map(board.map((s) => [s.entityId, s]));
+  const idByBytes = new Map(agentRows.map((a) => [agentIdToBytes32(a.id).toLowerCase(), a.id]));
   let verified = 0;
 
-  for (const { id } of agentRows) {
-    const bytes = agentIdToBytes32(id);
-    try {
-      const reading = await opts.perf.getPerformance(bytes);
-      if (!reading) continue;
-      const latest = await opts.perf.latestReport(bytes);
-      if (!latest) continue;
-      const asOf = toUnixMs(reading.asOf);
+  if (opts.cursor) {
+    const { perf, cursor } = opts;
+    if (!perf.reportLogs || !perf.latestBlock) throw new Error("cursor sync needs perf.reportLogs and perf.latestBlock");
+    const chunk = BigInt(opts.chunkBlocks ?? DEFAULT_LOG_CHUNK_BLOCKS);
+    if (chunk < 1n) throw new RangeError("chunkBlocks must be >= 1");
+    const head = await perf.latestBlock();
+    const stored = await cursor.read();
+    let start = stored !== null ? stored + 1n : (opts.fromBlock ?? 0n);
 
-      await insertAttestation(opts.db, {
-        id: `perf:${id}:${reading.asOf.toString()}`,
-        kind: "perf",
-        txHash: latest.txHash,
-        asOf,
-        payload: {
-          agentId: id,
-          agentIdBytes32: bytes,
-          asOf: reading.asOf.toString(),
-          realizedPnlUsd6: reading.realizedPnlUsd6.toString(),
-          volumeUsd6: reading.volumeUsd6.toString(),
-          trades: reading.trades,
-          winRateBps: reading.winRateBps,
-          maxDrawdownBps: reading.maxDrawdownBps,
-          forecastHitRateBps: reading.forecastHitRateBps,
-          hwmUsd6: reading.hwmUsd6.toString(),
-          commissionOwedCumulativeUsd6: reading.commissionOwedCumulativeUsd6.toString(),
-        },
-      });
+    while (start <= head) {
+      const end = start + chunk - 1n < head ? start + chunk - 1n : head;
+      const logs = await perf.reportLogs(start, end);
+      // Logs are oldest first, so the last one per agent is the newest report in this chunk.
+      const latestByAgent = new Map<string, ReportLog>();
+      for (const log of logs) latestByAgent.set(log.agentIdBytes32.toLowerCase(), log);
 
-      const stat = statsById.get(id);
-      if (!stat) {
-        logger.warn("attested agent has no stats row yet; run recomputeStats first", { agent: id });
-        continue;
+      for (const [bytes, log] of latestByAgent) {
+        const agentId = idByBytes.get(bytes);
+        if (!agentId) continue;
+        try {
+          if (await verifyAgent(opts, agentId, bytes as Hex, { txHash: log.txHash }, logger)) verified += 1;
+        } catch (err) {
+          logger.warn("attestation sync failed for agent", { agent: agentId, error: err });
+        }
       }
-      const { entityId, kind, name, template, mode, realizedPnlUsd, realizedPnlPct, volumeUsd, trades, winRateBps, maxDrawdownBps, forecastHitRateBps, daysActive, selfFunded } = stat;
-      await upsertStats(opts.db, [
-        {
-          entityId,
-          kind,
-          name,
-          template,
-          mode,
-          realizedPnlUsd,
-          realizedPnlPct,
-          volumeUsd,
-          trades,
-          winRateBps,
-          maxDrawdownBps,
-          forecastHitRateBps,
-          daysActive,
-          selfFunded,
-          verified: { reportTx: latest.txHash, asOf },
-        },
-      ]);
-      verified += 1;
+      await cursor.write(end);
+      start = end + 1n;
+    }
+    return verified;
+  }
+
+  for (const [bytes, agentId] of idByBytes) {
+    try {
+      const hex = bytes as Hex;
+      const latest = await opts.perf.latestReport(hex);
+      if (!latest) continue;
+      if (await verifyAgent(opts, agentId, hex, { txHash: latest.txHash }, logger)) verified += 1;
     } catch (err) {
-      logger.warn("attestation sync failed for agent", { agent: id, error: err });
+      logger.warn("attestation sync failed for agent", { agent: agentId, error: err });
     }
   }
   return verified;
@@ -235,9 +291,29 @@ export async function syncOrderFills(opts: {
   return { polled: open.length, fillsInserted };
 }
 
-/** PerformanceRegistry reads over viem. Events are scanned from fromBlock (PERF_REGISTRY_FROM_BLOCK). */
-export function createPerfChain(opts: { client: PublicClient; address: Hex; fromBlock: bigint }): PerfChain {
+/**
+ * PerformanceRegistry reads over viem. Log scans are chunked by chunkBlocks (LOG_CHUNK_BLOCKS), starting at
+ * fromBlock (PERF_REGISTRY_FROM_BLOCK).
+ */
+export function createPerfChain(opts: { client: PublicClient; address: Hex; fromBlock: bigint; chunkBlocks?: number }): PerfChain {
   const { client, address, fromBlock } = opts;
+  const chunk = BigInt(opts.chunkBlocks ?? DEFAULT_LOG_CHUNK_BLOCKS);
+
+  const reportLogs = async (from: bigint, to: bigint): Promise<ReportLog[]> => {
+    const logs = await client.getContractEvents({
+      address,
+      abi: PERFORMANCE_REGISTRY_ABI,
+      eventName: "PerformanceReported",
+      fromBlock: from,
+      toBlock: to,
+    });
+    return logs.map((log) => ({
+      agentIdBytes32: ((log.args as { agentId: Hex }).agentId ?? "0x") as Hex,
+      txHash: log.transactionHash,
+      blockNumber: log.blockNumber,
+    }));
+  };
+
   return {
     async getPerformance(agentIdBytes32) {
       const e = (await client.readContract({
@@ -269,18 +345,28 @@ export function createPerfChain(opts: { client: PublicClient; address: Hex; from
         commissionOwedCumulativeUsd6: e.commissionOwedCumulativeUsd6,
       };
     },
+
     async latestReport(agentIdBytes32) {
-      const logs = await client.getContractEvents({
-        address,
-        abi: PERFORMANCE_REGISTRY_ABI,
-        eventName: "PerformanceReported",
-        args: { agentId: agentIdBytes32 },
-        fromBlock,
-        toBlock: "latest",
-      });
-      const last = logs.at(-1);
-      if (!last) return null;
-      return { txHash: last.transactionHash, blockNumber: last.blockNumber };
+      // Per-agent lookup, chunked like the cursor sync. Kept for callers that do not persist a cursor.
+      const head = await client.getBlockNumber();
+      let latest: { txHash: Hex; blockNumber: bigint } | null = null;
+      for (let start = fromBlock; start <= head; start += chunk) {
+        const end = start + chunk - 1n < head ? start + chunk - 1n : head;
+        const logs = await client.getContractEvents({
+          address,
+          abi: PERFORMANCE_REGISTRY_ABI,
+          eventName: "PerformanceReported",
+          args: { agentId: agentIdBytes32 },
+          fromBlock: start,
+          toBlock: end,
+        });
+        const last = logs.at(-1);
+        if (last) latest = { txHash: last.transactionHash, blockNumber: last.blockNumber };
+      }
+      return latest;
     },
+
+    reportLogs,
+    latestBlock: () => client.getBlockNumber(),
   };
 }

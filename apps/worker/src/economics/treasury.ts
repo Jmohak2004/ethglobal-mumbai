@@ -3,7 +3,7 @@
 // The chain is behind the TreasuryChain interface, so the decision logic is testable without RPC.
 
 import {
-  createTopup,
+  createTopupIfAbsent,
   insertTreasuryEvent,
   listTopupsByAgent,
   type Db,
@@ -45,6 +45,7 @@ export function topupIdFor(agentId: string, nonce: bigint | number): string {
   return `topup-${agentId}-${nonce.toString()}`;
 }
 
+/** Top-up by row id, among the agent's most recent top-ups. Prefer getTopupByNonce when the nonce is known. */
 export async function findTopup(db: Db, agentId: string, id: string): Promise<TopupRecord | null> {
   const rows = await listTopupsByAgent(db, agentId, 500);
   return rows.find((r) => r.id === id) ?? null;
@@ -137,21 +138,18 @@ export function createTreasury(opts: TreasuryOptions): Treasury {
       const { txHash, nonce } = await chain.topUp(id32, amount);
       if (nonce === null) throw new Error(`topUp tx ${txHash} emitted no TopUpRequested log`);
 
-      const id = topupIdFor(agent.id, nonce);
+      // Keyed by (agent, nonce). If the relayer already recorded this nonce, its row is kept as it is.
       const amountUsd = fromUsd6(amount);
-      if (!(await findTopup(db, agent.id, id))) {
-        await createTopup(db, {
-          id,
-          agentId: agent.id,
-          usdcAmount: amountUsd,
-          baseTx: txHash,
-          zgTransferTx: null,
-          depositTx: null,
-          firstPaidRequestId: null,
-          status: "requested",
-          ts: now,
-        });
-      }
+      const { topup } = await createTopupIfAbsent(db, {
+        id: topupIdFor(agent.id, nonce),
+        agentId: agent.id,
+        nonce,
+        usdcAmount: amountUsd,
+        baseTx: txHash,
+        status: "requested",
+        ts: now,
+      });
+      const id = topup.id;
       await insertTreasuryEvent(db, {
         agentId: agent.id,
         kind: "topup_requested",

@@ -18,7 +18,7 @@ import {
 } from "@arena/shared";
 import { ZeroGRouter } from "@arena/zerog";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
-import type { Clock, Deps, BudgetReading, BudgetSource, MarketData, RiskSource } from "./deps.ts";
+import type { Clock, Deps, BudgetReading, BudgetSource, EntryOrderControl, MarketData, RiskSource } from "./deps.ts";
 import { loadWorkerEnv } from "./env.ts";
 import { silentLogger } from "./logger.ts";
 import { LocalWalletProvider } from "./wallets.ts";
@@ -91,14 +91,44 @@ export function fakeMarket(prices: Record<string, number>): FakeMarket {
   return market;
 }
 
-export function fakeRisk(level: RiskLevel = "NORMAL"): RiskSource & { level: RiskLevel } {
+/** Risk source whose level and report time (asOf, unix ms) can be changed between checks. */
+export function fakeRisk(level: RiskLevel = "NORMAL", asOf: number | null = NOW): RiskSource & { level: RiskLevel; asOf: number | null } {
   const source = {
     level,
+    asOf,
     async current() {
       return source.level;
     },
+    async reading() {
+      return { level: source.level, asOf: source.asOf };
+    },
   };
   return source;
+}
+
+export interface FakeOrderControl extends EntryOrderControl {
+  cancels: Array<{ orderId: string; funderAddress: string }>;
+  stops: Array<{ orderId: string; funderAddress: string; stopLossPrice: number }>;
+  /** Makes the next call with this order id throw. */
+  failOn: Set<string>;
+}
+
+/** Records live cancel and stop calls without touching Flash. */
+export function fakeOrderControl(): FakeOrderControl {
+  const control: FakeOrderControl = {
+    cancels: [],
+    stops: [],
+    failOn: new Set(),
+    async cancelOrder(orderId, funderAddress) {
+      if (control.failOn.has(orderId)) throw new Error(`flash rejected cancel for ${orderId}`);
+      control.cancels.push({ orderId, funderAddress });
+    },
+    async setStopLoss(orderId, funderAddress, stopLossPrice) {
+      if (control.failOn.has(orderId)) throw new Error(`flash rejected stop change for ${orderId}`);
+      control.stops.push({ orderId, funderAddress, stopLossPrice });
+    },
+  };
+  return control;
 }
 
 export interface FakeBudget extends BudgetSource {

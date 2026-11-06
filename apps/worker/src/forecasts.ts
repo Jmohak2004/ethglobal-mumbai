@@ -1,34 +1,15 @@
 // Forecast resolution (PRD 6.4). Due forecasts are scored against the current Chainlink price.
-//
-// Hit rule:
+// The hit rule lives in @arena/db (forecastHit) and is the one resolveForecast stores:
 //   - up:   the price moved up, and the move is at least 25% of expectedMovePct.
 //   - down: the price moved down, and the move is at least 25% of expectedMovePct.
 //   - flat: the absolute move is within ±0.2%.
-//
-// The db package's resolveForecast scores with a different rule (direction only, flat within
-// expectedMovePct), so this module writes the result itself through an upsert. See the report.
 
-import { forecasts, listDueForecasts, type Db, type StoredForecast } from "@arena/db";
-import type { Forecast } from "@arena/shared";
+import { listDueForecasts, resolveForecast, type Db } from "@arena/db";
 import type { Clock, MarketData } from "./deps.ts";
 import type { Logger } from "./logger.ts";
 import { silentLogger } from "./logger.ts";
 
-export const FLAT_BAND_PCT = 0.2;
-export const MIN_MOVE_FRACTION = 0.25;
-
-/** Whether a forecast was right, given the price when it was made and the price at resolution. */
-export function forecastHit(
-  forecast: Pick<Forecast, "direction" | "expectedMovePct">,
-  priceAtForecast: number,
-  resolvedPrice: number,
-): boolean {
-  if (!(priceAtForecast > 0) || !Number.isFinite(resolvedPrice)) return false;
-  const movePct = ((resolvedPrice - priceAtForecast) / priceAtForecast) * 100;
-  if (forecast.direction === "flat") return Math.abs(movePct) <= FLAT_BAND_PCT;
-  const directionMatched = forecast.direction === "up" ? movePct > 0 : movePct < 0;
-  return directionMatched && Math.abs(movePct) >= MIN_MOVE_FRACTION * forecast.expectedMovePct;
-}
+export { forecastHit, FLAT_BAND_PCT, MIN_MOVE_FRACTION } from "@arena/db";
 
 export interface ResolveResult {
   due: number;
@@ -54,37 +35,14 @@ export async function resolveDueForecasts(opts: ResolveOptions): Promise<Resolve
   for (const f of due) {
     try {
       const resolvedPrice = await opts.market.getPrice(f.asset);
-      const hit = forecastHit(f, f.priceAtForecast, resolvedPrice);
-      await writeResolution(opts.db, f, resolvedPrice, hit);
+      // resolveForecast is idempotent: a row resolved by another pass is returned unchanged.
+      const row = await resolveForecast(opts.db, f.id, resolvedPrice);
       resolved += 1;
-      logger.info("forecast resolved", { agent: f.agentId, forecast: f.id, asset: f.asset, hit });
+      logger.info("forecast resolved", { agent: f.agentId, forecast: f.id, asset: f.asset, hit: row?.hit ?? null });
     } catch (err) {
       failed += 1;
       logger.warn("forecast resolution failed", { agent: f.agentId, forecast: f.id, error: err });
     }
   }
   return { due: due.length, resolved, failed };
-}
-
-/** Upserts the resolved row by id. Only resolves rows still unresolved, so re-running is harmless. */
-async function writeResolution(db: Db, f: StoredForecast, resolvedPrice: number, hit: boolean): Promise<void> {
-  if (f.resolvedPrice !== null) return;
-  await db
-    .insert(forecasts)
-    .values({
-      id: f.id,
-      agentId: f.agentId,
-      episodeId: f.episodeId,
-      asset: f.asset,
-      horizonMin: f.horizonMin,
-      direction: f.direction,
-      expectedMovePct: f.expectedMovePct,
-      confidence: f.confidence,
-      priceAtForecast: f.priceAtForecast,
-      resolveAt: f.resolveAt,
-      resolvedPrice,
-      hit,
-      createdAt: f.createdAt,
-    })
-    .onConflictDoUpdate({ target: forecasts.id, set: { resolvedPrice, hit } });
 }

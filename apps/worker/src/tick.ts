@@ -3,21 +3,7 @@
 // The LLM can only ever reach the venue through evaluate(). runTick never throws: every failure is
 // recorded on the episode, and the returned TickResult says what happened.
 
-import {
-  insertEpisode,
-  insertForecast,
-  insertFills,
-  insertGuardrailBlock,
-  insertInference,
-  topForAgent,
-  upsertOrder,
-  newId,
-  type Db,
-  type FillRecord,
-  type InsertForecastInput,
-  type OrderRecord,
-} from "@arena/db";
-import { computeFifoPnl, type ExecutionResult, type FifoPnlResult, type OrderSigner, type Trade } from "@arena/flash";
+import { latestInsightDigest, newId, topForAgent, type Db, type InsertForecastInput } from "@arena/db";
 import { evaluate, TEMPLATES } from "@arena/policy";
 import type {
   Agent,
@@ -27,14 +13,25 @@ import type {
   ExecutionMode,
   InferenceTrace,
   MarketSnapshot,
-  OrderIntent,
   PolicyContext,
   PolicyVerdict,
 } from "@arena/shared";
-import { decide, InsufficientBalanceError, type InsightDigest } from "@arena/zerog";
+import { decide, InsufficientBalanceError, type AssetInsight, type InsightDigest } from "@arena/zerog";
+import { cancelPendingEntries } from "./crash.ts";
 import type { Deps } from "./deps.ts";
+import { loadAgentState, modeFor, persistTick, placeOrder, type Persistence } from "./execution.ts";
 
-const DAY_MS = 24 * 60 * 60 * 1000;
+export {
+  liveSignerFor,
+  loadAgentState,
+  orderRows,
+  paperSigner,
+  persistTick,
+  tradesFrom,
+  type AgentState,
+  type Persistence,
+} from "./execution.ts";
+
 const LESSON_LIMIT = 5;
 
 export interface TickResult {
@@ -56,95 +53,20 @@ export interface TickResult {
 const msg = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 const hold = (...reasons: string[]): PolicyVerdict => ({ kind: "noop", reasons });
 
-/** Paper mode never signs, so the funder is the trading address and signing throws if it is ever reached. */
-export function paperSigner(agent: Pick<Agent, "tradingWallet">): OrderSigner {
-  return {
-    address: agent.tradingWallet,
-    signTypedData: async () => {
-      throw new Error("paper mode never signs orders");
-    },
-  };
-}
-
-type OrderRow = Awaited<ReturnType<Db["query"]["orders"]["findMany"]>>[number];
-type FillRow = Awaited<ReturnType<Db["query"]["fills"]["findMany"]>>[number];
-
-/** Flash-normalized trades for an agent's fills, joined to the order side and asset. Fills without an order are dropped. */
-export function tradesFrom(orders: OrderRow[], fillRows: FillRow[]): Trade[] {
-  const byId = new Map(orders.map((o) => [o.id, o]));
-  const trades: Trade[] = [];
-  for (const f of fillRows) {
-    const o = byId.get(f.orderId);
-    if (!o) continue;
-    trades.push({
-      orderId: o.id,
-      side: o.side === "sell" ? "sell" : "buy",
-      asset: o.asset,
-      qty: f.qty,
-      price: f.price,
-      notionalUsd: f.notionalUsd,
-      feeUsd: f.feeUsd,
-      integratorFeeUsd: f.integratorFeeUsd,
-      txId: f.txId ?? "",
-      ts: f.ts,
-    });
-  }
-  return trades;
-}
-
-export interface AgentState {
-  trades: Trade[];
-  fifo: FifoPnlResult;
-  dailyPnlUsd: number;
-  dailyVolumeUsd: number;
-  lastTradeAt: number | null;
-}
-
-/** Loads the agent's fills and orders and derives the policy inputs from them (FIFO PnL, volume, cooldown). */
-export async function loadAgentState(db: Db, agent: Agent, now: number): Promise<AgentState> {
-  const orders = await db.query.orders.findMany({ where: (o, { eq }) => eq(o.agentId, agent.id) });
-  const orderIds = orders.map((o) => o.id);
-  const fillRows =
-    orderIds.length > 0 ? await db.query.fills.findMany({ where: (f, { inArray }) => inArray(f.orderId, orderIds) }) : [];
-
-  const trades = tradesFrom(orders, fillRows);
-  const dayStart = now - (now % DAY_MS);
-  const fifo = computeFifoPnl(trades, { startingCapitalUsd: agent.config.limits.maxAllocationUsd });
-  const before = computeFifoPnl(trades.filter((t) => t.ts < dayStart));
-  const dailyVolumeUsd = orders.filter((o) => o.createdAt >= dayStart).reduce((sum, o) => sum + o.notionalUsd, 0);
-  const lastTradeAt = orders.reduce<number | null>((max, o) => (max === null || o.createdAt > max ? o.createdAt : max), null);
-
-  return {
-    trades,
-    fifo,
-    dailyPnlUsd: fifo.realizedPnlUsd - before.realizedPnlUsd,
-    dailyVolumeUsd,
-    lastTradeAt,
-  };
-}
-
 /**
- * Latest insight digest for the agent's assets, if any were recorded (PRD 6.8). The digest table has no
- * repo yet, so this reads it directly. Returns undefined when there is nothing to inject.
+ * The newest insight digest per configured asset for this agent, shaped for decide(). Returns undefined when
+ * no asset has a digest. The digest repo returns one row per (agent, asset), so this makes one query per asset.
  */
-export async function latestInsight(db: Db, assets: string[]): Promise<InsightDigest | undefined> {
-  if (assets.length === 0) return undefined;
-  const rows = await db.query.insightDigests.findMany({
-    where: (t, { inArray }) => inArray(t.asset, assets),
-    orderBy: (t, { desc }) => [desc(t.ts)],
-    limit: 50,
-  });
-  const perAsset: InsightDigest["perAsset"] = {};
-  for (const row of rows) {
-    if (perAsset[row.asset]) continue;
-    perAsset[row.asset] = {
-      stance: row.stance as InsightDigest["perAsset"][string]["stance"],
-      confidence: row.confidence,
-      sourceIds: row.sourceIds,
-    };
+export async function latestInsight(db: Db, agentId: string, assets: string[]): Promise<InsightDigest | undefined> {
+  const perAsset: Record<string, AssetInsight> = {};
+  let newest: { zgRequestId: string | null; ts: number } | null = null;
+  for (const asset of assets) {
+    const digest = await latestInsightDigest(db, agentId, { asset });
+    if (!digest) continue;
+    perAsset[asset] = { stance: digest.stance, confidence: digest.confidence, sourceIds: digest.sourceIds };
+    if (!newest || digest.ts > newest.ts) newest = { zgRequestId: digest.zgRequestId, ts: digest.ts };
   }
   if (Object.keys(perAsset).length === 0) return undefined;
-  const newest = rows[0];
   return {
     perAsset,
     summary: "",
@@ -160,30 +82,6 @@ export async function latestInsight(db: Db, assets: string[]): Promise<InsightDi
     traces: [],
     error: null,
   };
-}
-
-interface Persistence {
-  traces: InferenceTrace[];
-  forecast: InsertForecastInput | null;
-  order: { record: OrderRecord; fills: FillRecord[] } | null;
-}
-
-/** Writes the episode first (other rows reference it), then its inference calls, forecast, guardrail and order. */
-export async function persistTick(db: Db, episode: Episode, extra: Persistence): Promise<void> {
-  await insertEpisode(db, episode);
-  for (const trace of extra.traces) {
-    await insertInference(db, trace, { agentId: episode.agentId, purpose: "decision", ts: episode.ts });
-  }
-  if (extra.forecast) {
-    await insertForecast(db, { ...extra.forecast, episodeId: episode.id });
-  }
-  if (episode.verdict.kind === "reject" || episode.verdict.kind === "clamp") {
-    await insertGuardrailBlock(db, { agentId: episode.agentId, episodeId: episode.id, reasons: episode.verdict.reasons, ts: episode.ts });
-  }
-  if (extra.order) {
-    await upsertOrder(db, extra.order.record);
-    await insertFills(db, extra.order.fills);
-  }
 }
 
 /** Runs one tick for one agent. Never throws. */
@@ -261,8 +159,17 @@ export async function runTick(deps: Deps, agent: Agent): Promise<TickResult> {
     };
 
     if (deps.globalLimits.killSwitch) {
-      log.warn("tick skipped: kill switch", {});
-      return finish(hold("GLOBAL_KILL_SWITCH is on: tick skipped before inference"), {});
+      // PRD 6.5: the kill switch stops new decisions but still cancels unfilled entries. Positions keep
+      // their exchange-side TP/SL.
+      const cancel = await cancelPendingEntries(deps, agent, now);
+      errors.push(...cancel.failed.map((f) => `cancel ${f.orderId}: ${f.error}`));
+      log.warn("tick skipped: kill switch", { cancelled: cancel.cancelled.length, failed: cancel.failed.length });
+      return finish(
+        hold(
+          `GLOBAL_KILL_SWITCH is on: tick skipped before inference; cancelled ${cancel.cancelled.length} pending entr${cancel.cancelled.length === 1 ? "y" : "ies"}`,
+        ),
+        {},
+      );
     }
     if (snapshots.length === 0) {
       errors.push("no market data available");
@@ -273,7 +180,7 @@ export async function runTick(deps: Deps, agent: Agent): Promise<TickResult> {
     }
 
     const lessons = await topForAgent(deps.db, agent.id, { k: LESSON_LIMIT });
-    const insights = await latestInsight(deps.db, agent.config.assets);
+    const insights = await latestInsight(deps.db, agent.id, agent.config.assets);
     const state = await loadAgentState(deps.db, agent, now);
     const openPositions = state.fifo.openPositions;
 
@@ -357,18 +264,16 @@ export async function runTick(deps: Deps, agent: Agent): Promise<TickResult> {
     let order: Persistence["order"] = null;
     let orderId: string | null = null;
     if (verdict.kind === "approve" || verdict.kind === "clamp") {
-      const mode: ExecutionMode = deps.executionMode === "live" && agent.mode === "live" ? "live" : "paper";
-      result.mode = mode;
       try {
-        const signer = mode === "live" ? await liveSignerFor(deps, agent) : paperSigner(agent);
-        const exec = await deps.executor.execute(verdict.order, signer, mode, { referencePriceUsd: markPrice });
-        const built = orderRows(exec, agent, verdict.order, now);
-        order = built;
-        orderId = exec.orderId;
-        result.orderId = exec.orderId;
+        const placed = await placeOrder(deps, agent, verdict.order, markPrice, now);
+        order = placed.persist;
+        orderId = placed.orderId;
+        result.mode = placed.mode;
+        result.orderId = placed.orderId;
         result.sold = verdict.order.side === "sell";
-        log.info("order sent", { orderId: exec.orderId, mode, side: verdict.order.side, asset: verdict.order.asset, notionalUsd: verdict.order.notionalUsd });
+        log.info("order sent", { orderId: placed.orderId, mode: placed.mode, side: verdict.order.side, asset: verdict.order.asset, notionalUsd: verdict.order.notionalUsd });
       } catch (err) {
+        result.mode = modeFor(deps, agent);
         errors.push(`execution failed: ${msg(err)}`);
         log.error("execution failed", { error: err });
       }
@@ -402,63 +307,4 @@ export async function runTick(deps: Deps, agent: Agent): Promise<TickResult> {
     }
     return result;
   }
-}
-
-/** Live signer for an agent. The derived address must match the trading wallet the DB recorded. */
-async function liveSignerFor(deps: Deps, agent: Agent): Promise<OrderSigner> {
-  const signer = await deps.wallets.signerFor(agent);
-  if (signer.address.toLowerCase() !== agent.tradingWallet.toLowerCase()) {
-    throw new Error(`signer ${signer.address} does not match the agent trading wallet ${agent.tradingWallet}`);
-  }
-  return signer;
-}
-
-/** DB rows for an executed order: the order itself and, for paper fills, the simulated fill. */
-export function orderRows(
-  exec: ExecutionResult,
-  agent: Pick<Agent, "id" | "tradingWallet">,
-  intent: OrderIntent,
-  now: number,
-): { record: OrderRecord; fills: FillRecord[] } {
-  const base = {
-    id: exec.orderId,
-    agentId: agent.id,
-    funderAddress: agent.tradingWallet,
-    side: intent.side,
-    asset: intent.asset,
-    orderType: intent.orderType,
-    notionalUsd: intent.notionalUsd,
-    createdAt: now,
-    updatedAt: now,
-  };
-  if (exec.paper) {
-    return {
-      record: {
-        ...base,
-        status: exec.status,
-        raw: { paper: true, quoteId: exec.quote.quoteId, fill: exec.fill },
-      },
-      fills: [
-        {
-          id: `${exec.orderId}:fill`,
-          orderId: exec.orderId,
-          price: exec.fill.price,
-          qty: exec.fill.qty,
-          notionalUsd: exec.fill.notionalUsd,
-          feeUsd: Number(exec.quote.fees.estimatedFeeNotional) || 0,
-          integratorFeeUsd: 0,
-          txId: null,
-          ts: exec.fill.ts,
-        },
-      ],
-    };
-  }
-  return {
-    record: {
-      ...base,
-      status: exec.status,
-      raw: { quoteId: exec.quote.quoteId, attachedBracketStatus: exec.attachedBracketStatus },
-    },
-    fills: [],
-  };
 }
