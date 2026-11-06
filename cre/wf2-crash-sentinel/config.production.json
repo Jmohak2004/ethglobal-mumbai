@@ -1,0 +1,29 @@
+{
+  "cronSchedule": "*/2 * * * *",
+  "httpAuthorizedKeys": [],
+  "allowSimulate": false,
+  "chainSelectorName": "ethereum-mainnet-base-1",
+  "isTestnet": false,
+  "riskOracle": "0x0000000000000000000000000000000000000000",
+  "gasLimit": "500000",
+  "feeds": {
+    "ETH_USD": "0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70",
+    "BTC_USD": "0x64c911996D3c6aC71f9b455B1E8E7266BcbD848F"
+  },
+  "lookbackRounds": 4,
+  "coingeckoUrl": "https://api.coingecko.com/api/v3/simple/price?ids=ethereum,bitcoin,usd-coin&vs_currencies=usd&include_24hr_change=true",
+  "thresholds": {
+    "shortWindowCautionBps": 250,
+    "shortWindowHaltBps": 500,
+    "drop24hCautionBps": 500,
+    "drop24hHaltBps": 1000,
+    "depegHaltBps": 100,
+    "llmCautionScore": 0.8
+  },
+  "llm": {
+    "enabled": false,
+    "routerUrl": "https://router-api.0g.ai/v1",
+    "model": "SET-FROM-0G-ROUTER-MODELS",
+    "context": ""
+  }
+}

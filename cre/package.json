@@ -1,0 +1,21 @@
+{
+  "name": "arena-cre",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test lib",
+    "compile:wf1": "bun x cre-compile wf1-performance-attestor/main.ts wf1-performance-attestor/dist/workflow.wasm",
+    "compile:wf2": "bun x cre-compile wf2-crash-sentinel/main.ts wf2-crash-sentinel/dist/workflow.wasm"
+  },
+  "dependencies": {
+    "@chainlink/cre-sdk": "~1.23.0",
+    "viem": "^2.54.2",
+    "zod": "3.25.76"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "5.9.3"
+  }
+}

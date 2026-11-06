@@ -1,0 +1,49 @@
+// Golden vectors generated from packages/shared/src/onchain.ts (the monorepo encoder the Solidity side uses).
+// If these fail, the CRE encoding has drifted from the shared encoding. Fix lib/onchain.ts, not the vectors.
+import { describe, expect, test } from "bun:test";
+import { decodePerfReport, encodePerfReport, encodeRiskReport, agentIdToBytes32, humanAgentId } from "./onchain.ts";
+
+const AGENT_ID = "0xfcceee6781fd5df4c0f10b191465a2892510492c86325ffe2b25d754e5e1824e";
+const PERF_GOLDEN =
+  "0x00000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000001fcceee6781fd5df4c0f10b191465a2892510492c86325ffe2b25d754e5e1824effffffffffffffffffffffffffffffffffffffffffffffffffffffffffed2979000000000000000000000000000000000000000000000000000000024cb016ea000000000000000000000000000000000000000000000000000000000000002a0000000000000000000000000000000000000000000000000000000000001a0a0000000000000000000000000000000000000000000000000000000000000bb8000000000000000000000000000000000000000000000000000000000000157c0000000000000000000000000000000000000000000000000000000007270e000000000000000000000000000000000000000000000000000000000000b71b00000000000000000000000000000000000000000000000000000000006955b900";
+
+describe("encoding parity with packages/shared", () => {
+  test("agentId is keccak256 of the UUID string", () => {
+    expect(agentIdToBytes32("11111111-2222-3333-4444-555555555555")).toBe(AGENT_ID);
+  });
+
+  test("PerformanceRegistry payload matches the golden vector byte-for-byte", () => {
+    const encoded = encodePerfReport([
+      {
+        agentId: AGENT_ID,
+        realizedPnlUsd6: -1234567n,
+        volumeUsd6: 9876543210n,
+        trades: 42,
+        winRateBps: 6666,
+        maxDrawdownBps: 3000,
+        forecastHitRateBps: 5500,
+        hwmUsd6: 120000000n,
+        commissionOwedCumulativeUsd6: 12000000n,
+        asOf: 1767225600n,
+      },
+    ]);
+    expect(encoded).toBe(PERF_GOLDEN);
+    expect(decodePerfReport(PERF_GOLDEN)[0]?.realizedPnlUsd6).toBe(-1234567n);
+  });
+
+  test("RiskOracle payloads match golden vectors", () => {
+    expect(encodeRiskReport(2, 1, 1767225600n)).toBe(
+      "0x00000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000006955b900",
+    );
+    expect(encodeRiskReport(1, 5, 1767225600n)).toBe(
+      "0x00000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000005000000000000000000000000000000000000000000000000000000006955b900",
+    );
+    expect(encodeRiskReport(0, 0, 0n)).toBe(("0x" + "00".repeat(96)) as `0x${string}`);
+  });
+
+  test("humans are keyed by their left-padded address", () => {
+    expect(humanAgentId("0x1111111111111111111111111111111111111111")).toBe(
+      "0x0000000000000000000000001111111111111111111111111111111111111111",
+    );
+  });
+});

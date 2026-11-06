@@ -1,0 +1,13 @@
+# ==========================================================================
+# CRE PROJECT SETTINGS FILE (arena-cre)
+# ==========================================================================
+# Base Sepolia for staging, Base mainnet for production. Public RPCs; swap for private RPCs if rate limited.
+staging-settings:
+  rpcs:
+    - chain-name: ethereum-testnet-sepolia-base-1
+      url: https://sepolia.base.org
+
+production-settings:
+  rpcs:
+    - chain-name: ethereum-mainnet-base-1
+      url: https://mainnet.base.org

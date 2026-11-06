@@ -1,0 +1,17 @@
+{
+  "cronSchedule": "*/15 * * * *",
+  "httpAuthorizedKeys": [],
+  "chainSelectorName": "ethereum-mainnet-base-1",
+  "isTestnet": false,
+  "agentRegistry": "0x0000000000000000000000000000000000000000",
+  "performanceRegistry": "0x0000000000000000000000000000000000000000",
+  "feeds": {
+    "ETH_USD": "0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70",
+    "BTC_USD": "0x64c911996D3c6aC71f9b455B1E8E7266BcbD848F"
+  },
+  "maxFeedAgeSec": 86400,
+  "flashApiUrl": "https://flash.definitive.fi/v1",
+  "maxFlashPages": 10,
+  "humanWallets": [],
+  "gasLimit": "2000000"
+}
