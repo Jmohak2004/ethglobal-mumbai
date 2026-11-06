@@ -3,6 +3,14 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "scripts": { "dev": "bun --watch src/index.ts", "start": "bun src/index.ts", "typecheck": "tsc -p ." },
-  "dependencies": { "@arena/db": "workspace:*", "@arena/shared": "workspace:*", "grammy": "^1.46.0" }
+  "scripts": {
+    "dev": "bun --env-file=../../.env --watch src/index.ts",
+    "start": "bun --env-file=../../.env src/index.ts",
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "@arena/db": "workspace:*",
+    "@arena/shared": "workspace:*",
+    "grammy": "^1.46.0"
+  }
 }
