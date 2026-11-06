@@ -135,21 +135,63 @@ function fromPermitOrNull(raw: string | null | undefined): TypedDataJson | null 
 
 // ---- Quote ----
 
+/**
+ * Paper mode. With a Flash key, prices the simulated fill from a real Flash quote (same request a live order
+ * would send, so price, slippage and fees are real); nothing is signed or submitted. Without a key, or if the
+ * quote fails, falls back to the mark price and says so in the note.
+ */
+async function paperQuote(ticket: TicketInput, funder: `0x${string}`, markPriceUsd: number, integratorFeeUsd: number): Promise<TradeQuote> {
+  const e = env();
+  const fallback = (why: string): TradeQuote => ({
+    mode: "paper",
+    notionalUsd: ticket.sizeUsd,
+    priceUsd: markPriceUsd,
+    feeUsd: integratorFeeUsd,
+    note: `Paper mode: simulated fill at the mark price (${why}). Nothing was sent to Flash.`,
+  });
+  if (!e.DEFINITIVE_API_KEY) return fallback("no Flash key configured");
+  let req: QuoteRequest;
+  try {
+    req = intentToQuoteRequest(ticketToIntent(ticket), {
+      chain: "base",
+      funderAddress: funder,
+      integratorFeeBps: e.FLASH_INTEGRATOR_FEE_BPS,
+      tokens: BASE_TOKENS,
+      referencePriceUsd: markPriceUsd,
+    });
+  } catch (err) {
+    if (err instanceof FlashMappingError) throw new ApiError(422, "VALIDATION", err.message);
+    throw err;
+  }
+  let quote: QuoteResponse;
+  try {
+    quote = await flash().quote(req);
+  } catch (err) {
+    return fallback(`Flash quote failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  const target = quote.from.asset === "target" ? quote.from : quote.to;
+  const contra = quote.from.asset === "contra" ? quote.from : quote.to;
+  const qty = Number(target.amount);
+  const priceUsd = qty > 0 ? Number(contra.notional) / qty : markPriceUsd;
+  const flashFeeUsd = Number(quote.fees.estimatedFeeNotional) || 0;
+  return {
+    mode: "paper",
+    notionalUsd: ticket.sizeUsd,
+    priceUsd,
+    feeUsd: integratorFeeUsd + flashFeeUsd,
+    quoteId: quote.quoteId,
+    priceImpact: quote.estimatedPriceImpact ?? null,
+    note: `Paper mode: real Flash quote ${quote.quoteId.slice(0, 8)}…, simulated fill. Nothing was signed or submitted.`,
+  };
+}
+
 export async function quoteTicket(input: { ticket: TicketInput; funder: `0x${string}`; markPriceUsd: number }): Promise<TradeQuote> {
   const { ticket, funder, markPriceUsd } = input;
   assertTicketLimits(ticket);
   const e = env();
   const feeUsd = (ticket.sizeUsd * e.FLASH_INTEGRATOR_FEE_BPS) / 10_000;
 
-  if (!flashLive()) {
-    return {
-      mode: "paper",
-      notionalUsd: ticket.sizeUsd,
-      priceUsd: markPriceUsd,
-      feeUsd,
-      note: "Paper mode: simulated fill at the mark price. Nothing was sent to Flash and no signature is requested.",
-    };
-  }
+  if (!flashLive()) return paperQuote(ticket, funder, markPriceUsd, feeUsd);
 
   const intent = ticketToIntent(ticket);
   let req: QuoteRequest;

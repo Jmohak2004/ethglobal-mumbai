@@ -321,6 +321,9 @@ export type TradeQuote =
       priceUsd: number;
       feeUsd: number;
       note: string;
+      /** Set when the simulated fill is priced from a real Flash quote (DEFINITIVE_API_KEY present). */
+      quoteId?: string;
+      priceImpact?: string | null;
     }
   | {
       mode: "live";
