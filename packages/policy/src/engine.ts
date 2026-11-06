@@ -181,6 +181,8 @@ function resolveTrailFraction(
  * Every failed rule adds a reason. Any rejection makes the verdict reject, with the blocking reasons.
  * Times (now, lastTradeAt) are unix ms. cooldownSec is seconds.
  */
+const SELL_ONLY_ORDER_TYPES: FlashOrderType[] = ["bracket", "stop-loss", "take-profit", "trailing-stop", "trailing-stop-limit"];
+
 export function evaluate(proposal: Proposal, ctx: PolicyContext, opts: EvaluateOptions = {}): PolicyVerdict {
   const minNotional = opts.minNotionalUsd ?? DEFAULT_MIN_NOTIONAL_USD;
   const maxDev = opts.maxLimitDeviationPct ?? DEFAULT_MAX_LIMIT_DEVIATION_PCT;
@@ -225,6 +227,21 @@ export function evaluate(proposal: Proposal, ctx: PolicyContext, opts: EvaluateO
     clamps.push(`no order type given; defaulted to ${orderType}`);
   } else {
     orderType = proposal.orderType;
+  }
+  // Flash order types are directional: exit types (bracket, stop-loss, take-profit, trailing stops) only sell,
+  // and "stop" is a stop-buy. A buy that names an exit type becomes the template's entry type (its TP/SL is
+  // attached below); a sell that names "stop" becomes a market sell.
+  if (isBuy && SELL_ONLY_ORDER_TYPES.includes(orderType)) {
+    // Use the template's entry type when the proposal carries the price it needs; otherwise enter at market.
+    const entry = def.defaultEntryOrderType;
+    const missingPrice =
+      (entry === "limit" && proposal.limitPrice === undefined) || (entry === "stop" && proposal.triggerPrice === undefined);
+    const replacement: FlashOrderType = missingPrice ? "market" : entry;
+    clamps.push(`${orderType} only applies to sells; entering with ${replacement} and an attached TP/SL instead`);
+    orderType = replacement;
+  } else if (!isBuy && orderType === "stop") {
+    clamps.push("stop is a stop-buy; selling with market instead");
+    orderType = "market";
   }
   if (!def.allowedOrderTypes.includes(orderType)) {
     rejects.push(`order type ${orderType} is not allowed for ${def.name}`);

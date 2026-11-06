@@ -457,3 +457,23 @@ describe("evaluate: sell sizing from positionUsd", () => {
     if (v.kind === "approve") expect(v.order.notionalUsd).toBeCloseTo(0.75, 9);
   });
 });
+
+describe("evaluate: order type direction", () => {
+  test("a buy proposing a sell-only bracket enters with the template entry type and keeps its attached TP/SL", () => {
+    const v = evaluate(buy({ orderType: "bracket" }), makeCtx());
+    expect(v.kind).toBe("clamp");
+    if (v.kind !== "clamp") return;
+    expect(v.order.side).toBe("buy");
+    expect(v.order.orderType).not.toBe("bracket");
+    expect(v.order.attachedBracket?.takeProfitPrice).toBeCloseTo(2080, 6);
+    expect(v.reasons.some((r) => r.includes("only applies to sells"))).toBe(true);
+  });
+
+  test("a sell proposing a stop-buy sells at market", () => {
+    const v = evaluate(sell({ orderType: "stop" }), makeCtx("breakout", { positionUsd: 2 }));
+    expect(v.kind).toBe("clamp");
+    if (v.kind !== "clamp") return;
+    expect(v.order.side).toBe("sell");
+    expect(v.order.orderType).toBe("market");
+  });
+});
