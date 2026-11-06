@@ -18,3 +18,4 @@ cre/**/.env
 *.log
 .telegram-state.json
 .relayer-cursor.json
+contracts/broadcast/**/dry-run/
