@@ -321,10 +321,14 @@ export async function provisionAgent(deps: ProvisionDeps, agent: Agent, opts: { 
   }
 }
 
-/** One run-loop pass: every agent with a provisioning gap in this environment, one at a time. */
-export async function provisionPass(deps: ProvisionDeps): Promise<ProvisionResult[]> {
+/**
+ * One run-loop pass: every agent with a provisioning gap in this environment, one at a time.
+ * `force` ignores backoff; the worker uses it for its first pass so a config fixed between restarts
+ * (e.g. DEV_AGENT_MNEMONIC added) takes effect immediately instead of after up to 30 minutes.
+ */
+export async function provisionPass(deps: ProvisionDeps, opts: { force?: boolean } = {}): Promise<ProvisionResult[]> {
   const agents = await listAgentsNeedingProvisioning(deps.db, provisioningRequirements(deps));
   const results: ProvisionResult[] = [];
-  for (const agent of agents) results.push(await provisionAgent(deps, agent));
+  for (const agent of agents) results.push(await provisionAgent(deps, agent, { force: opts.force }));
   return results;
 }

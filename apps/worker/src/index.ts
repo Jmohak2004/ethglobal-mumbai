@@ -240,11 +240,13 @@ async function cmdRun(env: WorkerEnv): Promise<void> {
   if (!rt.flash) log.warn("humans board sync disabled: DEFINITIVE_API_KEY is not set", {});
   // Provisioning passes can outlast the interval (RPC calls), so a pass never starts while one is running.
   let provisioning = false;
+  let firstProvision = true;
   const provision = async () => {
     if (provisioning) return;
     provisioning = true;
     try {
-      const results = await provisionPass(rt.provisionDeps());
+      const results = await provisionPass(rt.provisionDeps(), { force: firstProvision });
+      firstProvision = false;
       const failed = results.filter((r) => r.status === "failed").length;
       if (results.length > 0) log.info("provisioning pass", { agents: results.length, failed });
     } finally {
