@@ -1,0 +1,7 @@
+#!/usr/bin/env sh
+# Scan staged changes for secrets with gitleaks.
+if ! command -v gitleaks >/dev/null 2>&1; then
+  echo "gitleaks not installed. Install: brew install gitleaks" >&2
+  exit 1
+fi
+exec gitleaks git --pre-commit --staged --redact --verbose --config .gitleaks.toml
