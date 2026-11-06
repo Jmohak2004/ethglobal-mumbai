@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { loadWorkerEnv } from "./env.ts";
-import { accountIndexFor, LocalWalletProvider, PrivyWalletProvider } from "./wallets.ts";
+import { accountIndexFor, LocalWalletProvider, UnconfiguredWalletProvider } from "./wallets.ts";
 import { createLogger } from "./logger.ts";
 import { english, generateMnemonic } from "viem/accounts";
 
@@ -56,10 +56,43 @@ describe("wallets", () => {
     expect(() => new LocalWalletProvider({})).toThrow("DEV_AGENT_MNEMONIC");
   });
 
-  test("the Privy stub refuses to sign until it is configured", async () => {
-    const privy = new PrivyWalletProvider();
-    await expect(privy.signerFor()).rejects.toThrow("not configured");
-    await expect(privy.addressFor()).rejects.toThrow("not configured");
+  test("the message signer is the trading address, and signs EIP-191 over the exact text", async () => {
+    const wallets = new LocalWalletProvider({ mnemonic: TEST_MNEMONIC });
+    const message = await wallets.messageSignerFor({ id: "agent-a" });
+    expect(message.address).toBe(await wallets.addressFor({ id: "agent-a" }));
+    const signature = await message.signMessage("Definitive Flash v1 — Cancel Order\nOrder: x");
+    expect(signature).toMatch(/^0x[0-9a-fA-F]{130}$/);
+  });
+
+  test("local approvals need a configured chain sender, and fail clearly without one", async () => {
+    const wallets = new LocalWalletProvider({ mnemonic: TEST_MNEMONIC });
+    const sender = await wallets.tradingSenderFor({ id: "agent-a" });
+    expect(sender.address).toBe(await wallets.addressFor({ id: "agent-a" }));
+    await expect(sender.sendTransaction({ to: `0x${"11".repeat(20)}`, data: "0x" })).rejects.toThrow("no sendTransaction");
+  });
+
+  test("an unconfigured provider fails every wallet call with its reason", async () => {
+    const wallets = new UnconfiguredWalletProvider("WALLET_PROVIDER=local needs DEV_AGENT_MNEMONIC");
+    await expect(wallets.addressFor({ id: "agent-a" })).rejects.toThrow("DEV_AGENT_MNEMONIC");
+    await expect(wallets.signerFor({ id: "agent-a" })).rejects.toThrow("DEV_AGENT_MNEMONIC");
+    await expect(wallets.messageSignerFor({ id: "agent-a" })).rejects.toThrow("DEV_AGENT_MNEMONIC");
+  });
+});
+
+describe("wallet provider selection", () => {
+  test("WALLET_PROVIDER defaults to local", () => {
+    expect(loadWorkerEnv({}).WALLET_PROVIDER).toBe("local");
+  });
+
+  test("WALLET_PROVIDER=privy needs both Privy credentials at startup", () => {
+    expect(() => loadWorkerEnv({ WALLET_PROVIDER: "privy" })).toThrow();
+    expect(() => loadWorkerEnv({ WALLET_PROVIDER: "privy", PRIVY_APP_ID: "app" })).toThrow();
+    const env = loadWorkerEnv({ WALLET_PROVIDER: "privy", PRIVY_APP_ID: "app", PRIVY_APP_SECRET: "secret" });
+    expect(env.WALLET_PROVIDER).toBe("privy");
+  });
+
+  test("an unknown WALLET_PROVIDER is rejected", () => {
+    expect(() => loadWorkerEnv({ WALLET_PROVIDER: "turnkey" })).toThrow();
   });
 });
 

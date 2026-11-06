@@ -21,6 +21,7 @@ import type {
   PolicyVerdict,
   Proposal,
 } from "@arena/shared";
+import type { OrderControl } from "@arena/flash";
 import type { Deps, RiskReading } from "./deps.ts";
 import { loadAgentState, persistTick, placeOrder, type AgentState, type Persistence } from "./execution.ts";
 
@@ -36,6 +37,17 @@ const CANCELLED = "ORDER_STATUS_CANCELLED";
 type OrderRow = typeof ordersTable.$inferSelect;
 
 const msg = (err: unknown): string => (err instanceof Error ? err.message : String(err));
+
+/** The agent's signed Flash order control. Fails with a clear message when Flash is not configured. */
+async function orderControlOf(deps: Deps, agent: Agent): Promise<OrderControl> {
+  if (!deps.orderControlFor) throw new Error("live order control needs Flash signing, which is not configured");
+  return deps.orderControlFor(agent);
+}
+
+/** A plain decimal price, as Flash's update message requires: no exponent, no trailing zeros. */
+export function formatPrice(price: number): string {
+  return price.toFixed(8).replace(/\.?0+$/, "");
+}
 
 /** Paper orders never reach Flash, so their cancel and stop changes are database-only. */
 const isPaper = (o: Pick<OrderRow, "raw">): boolean => (o.raw as Record<string, unknown>)?.paper === true;
@@ -68,7 +80,8 @@ export interface CancelResult {
 
 /**
  * Cancels the agent's unfilled buy orders. Paper orders are marked cancelled in the database. Live orders
- * go to Flash first, through deps.orderControl; without that, each live order fails with a clear error.
+ * go to Flash first, as a cancel signed by the agent's message signer (deps.orderControlFor); without that,
+ * each live order fails with a clear error.
  */
 export async function cancelPendingEntries(deps: Deps, agent: Agent, now: number): Promise<CancelResult> {
   const result: CancelResult = { cancelled: [], failed: [] };
@@ -78,8 +91,8 @@ export async function cancelPendingEntries(deps: Deps, agent: Agent, now: number
   for (const order of pending) {
     try {
       if (!isPaper(order)) {
-        if (!deps.orderControl) throw new Error("live cancel needs Flash cancel signing, which is not configured");
-        await deps.orderControl.cancelOrder(order.id, order.funderAddress);
+        const control = await orderControlOf(deps, agent);
+        await control.cancel(order.id);
       }
       await upsertOrder(deps.db, toRecord(order, { status: CANCELLED, updatedAt: now }));
       result.cancelled.push({ orderId: order.id, asset: order.asset });
@@ -105,7 +118,7 @@ export interface TightenResult {
 /**
  * Raises the stop-loss on every open buy of `asset` that has a recorded stop, to max(current, mark x (1 - 1%)).
  * "Open" means not cancelled or rejected. Lot-level matching is not available, so a buy that has already
- * closed may be included. Live orders need deps.orderControl; paper stops are recorded on the order.
+ * closed may be included. Live orders need deps.orderControlFor; paper stops are recorded on the order.
  */
 export async function tightenStops(deps: Deps, agent: Agent, asset: string, mark: number, now: number): Promise<TightenResult> {
   const result: TightenResult = { moved: [], failed: [] };
@@ -126,8 +139,9 @@ export async function tightenStops(deps: Deps, agent: Agent, asset: string, mark
     if (to <= from) continue; // already at or above the target
     try {
       if (!isPaper(order)) {
-        if (!deps.orderControl) throw new Error("live stop changes need Flash order signing, which is not configured");
-        await deps.orderControl.setStopLoss(order.id, order.funderAddress, to);
+        const control = await orderControlOf(deps, agent);
+        // tightenStop reads the placed trigger and refuses a looser value before anything is signed.
+        await control.tightenStop(order.id, formatPrice(to));
       }
       const bracket = (order.raw as Record<string, unknown>).attachedBracket as Record<string, unknown>;
       await upsertOrder(

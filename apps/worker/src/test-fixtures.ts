@@ -1,7 +1,7 @@
 // Shared fakes for the worker tests. No network, no real keys (keys are generated per run), no real orders.
 
 import { createAgent, createDb, migrate, type Db } from "@arena/db";
-import type { ExecutionResult, OrderSigner, QuoteResponse } from "@arena/flash";
+import type { ExecutionResult, OrderControl, OrderSigner, QuoteResponse } from "@arena/flash";
 import { computeIndicators, configHash, defaultConfig } from "@arena/policy";
 import {
   globalLimitsFromEnv,
@@ -18,7 +18,7 @@ import {
 } from "@arena/shared";
 import { ZeroGRouter } from "@arena/zerog";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
-import type { Clock, Deps, BudgetReading, BudgetSource, EntryOrderControl, MarketData, RiskSource } from "./deps.ts";
+import type { Clock, Deps, BudgetReading, BudgetSource, MarketData, RiskSource } from "./deps.ts";
 import { loadWorkerEnv } from "./env.ts";
 import { silentLogger } from "./logger.ts";
 import { LocalWalletProvider } from "./wallets.ts";
@@ -106,26 +106,33 @@ export function fakeRisk(level: RiskLevel = "NORMAL", asOf: number | null = NOW)
   return source;
 }
 
-export interface FakeOrderControl extends EntryOrderControl {
-  cancels: Array<{ orderId: string; funderAddress: string }>;
-  stops: Array<{ orderId: string; funderAddress: string; stopLossPrice: number }>;
+export interface FakeOrderControl extends OrderControl {
+  /** Order ids cancelled, in call order. */
+  cancels: string[];
+  /** Stop moves, in call order. stopLossPrice is the plain decimal string passed to tightenStop. */
+  stops: Array<{ orderId: string; stopLossPrice: string }>;
   /** Makes the next call with this order id throw. */
   failOn: Set<string>;
 }
 
-/** Records live cancel and stop calls without touching Flash. */
+/** Records live cancel and stop calls without touching Flash or signing anything. */
 export function fakeOrderControl(): FakeOrderControl {
   const control: FakeOrderControl = {
     cancels: [],
     stops: [],
     failOn: new Set(),
-    async cancelOrder(orderId, funderAddress) {
+    async cancel(orderId) {
       if (control.failOn.has(orderId)) throw new Error(`flash rejected cancel for ${orderId}`);
-      control.cancels.push({ orderId, funderAddress });
+      control.cancels.push(orderId);
+      return { ok: true };
     },
-    async setStopLoss(orderId, funderAddress, stopLossPrice) {
+    async cancelMany() {
+      throw new Error("batch cancel is not used by these tests");
+    },
+    async tightenStop(orderId, stopLossPrice) {
       if (control.failOn.has(orderId)) throw new Error(`flash rejected stop change for ${orderId}`);
-      control.stops.push({ orderId, funderAddress, stopLossPrice });
+      control.stops.push({ orderId, stopLossPrice });
+      return { ok: true };
     },
   };
   return control;

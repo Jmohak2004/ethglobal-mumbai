@@ -5,6 +5,7 @@
 // new config version. Hard limits are never touched.
 
 import {
+  insertInference,
   insertLesson,
   listEpisodesByAgent,
   newId,
@@ -17,6 +18,7 @@ import { computeFifoPnl, type Trade } from "@arena/flash";
 import { configHash, TEMPLATES, validateConfig, type SliderDef } from "@arena/policy";
 import type { Agent, BudgetTier, GlobalLimits, Lesson, StrategyConfig } from "@arena/shared";
 import { reflect, type ClosedTrade, type MemoryStore, type SliderSuggestion, type ZeroGRouter } from "@arena/zerog";
+import type { InferenceTrace } from "@arena/shared";
 import type { Clock } from "./deps.ts";
 import type { Logger } from "./logger.ts";
 import { silentLogger } from "./logger.ts";
@@ -106,6 +108,27 @@ export function applySliderSuggestions(
   return { sliders, applied };
 }
 
+/**
+ * Records each 0G call of a reflection in inference_calls with purpose "reflection". Billed calls count toward the
+ * agent's budget tier and daily cap, so they are recorded whether or not the output was usable.
+ */
+async function recordReflectionCalls(
+  db: ReflectionDeps["db"],
+  agentId: string,
+  res: { trace: InferenceTrace; traces: InferenceTrace[] },
+  ts: number,
+  log: Logger,
+): Promise<void> {
+  const traces = res.traces.length > 0 ? res.traces : [res.trace];
+  for (const trace of traces) {
+    try {
+      await insertInference(db, trace, { agentId, purpose: "reflection", ts });
+    } catch (err) {
+      log.error("could not record reflection inference", { error: err, zgRequestId: trace.requestId });
+    }
+  }
+}
+
 /** Writes at most one auto-tune version per 24 h. Returns the changes applied (empty when none). */
 async function applyAutoTune(
   deps: ReflectionDeps,
@@ -173,6 +196,7 @@ export async function reflectAgent(deps: ReflectionDeps, agent: Agent, budget: B
       modelTier: agent.config.modelTier,
       budget,
     });
+    await recordReflectionCalls(deps.db, agent.id, res, now, log);
     if (res.error) {
       log.warn("reflection produced no usable output", { error: res.error });
       return { ...summary, error: res.error };

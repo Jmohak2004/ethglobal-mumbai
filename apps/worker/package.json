@@ -18,6 +18,7 @@
     "@arena/policy": "workspace:*",
     "@arena/shared": "workspace:*",
     "@arena/zerog": "workspace:*",
+    "@privy-io/node": "^0.38.0",
     "viem": "^2.40.0",
     "zod": "^4.1.0"
   }

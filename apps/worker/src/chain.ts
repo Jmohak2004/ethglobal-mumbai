@@ -19,6 +19,11 @@ export function chainConfigFor(env: Pick<WorkerEnv, "CHAIN" | "BASE_RPC_URL" | "
   return { name: "baseSepolia", viemChain: baseSepolia, rpcUrl: env.BASE_SEPOLIA_RPC_URL, tokens: BASE_SEPOLIA_TOKENS };
 }
 
+/** CAIP-2 id of the Base chain, as Privy's RPC and policies name it: eip155:8453 (Base) or eip155:84532 (Base Sepolia). */
+export function caip2For(chain: Pick<ChainConfig, "name">): string {
+  return chain.name === "base" ? "eip155:8453" : "eip155:84532";
+}
+
 export function publicClientFor(config: ChainConfig): PublicClient {
   return createPublicClient({ chain: config.viemChain, transport: http(config.rpcUrl) }) as PublicClient;
 }

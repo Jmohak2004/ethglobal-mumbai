@@ -121,7 +121,7 @@ An order is submitted only when all of these hold:
 - `GLOBAL_KILL_SWITCH=false`
 - `DEFINITIVE_API_KEY` is set
 
-Live signing currently uses the dev-only local wallet provider (`DEV_AGENT_MNEMONIC` or `DEV_AGENT_PRIVATE_KEY`). The Privy server-wallet provider is a stub that throws.
+Live signing uses either the dev-only local wallet provider (`DEV_AGENT_MNEMONIC` or `DEV_AGENT_PRIVATE_KEY`) or Privy server wallets (`WALLET_PROVIDER=privy`, see `docs/SETUP.md`). The Privy provider is implemented but not yet exercised against the live Privy API.
 
 Safety caps, all configurable, with the defaults from `.env.example`:
 
@@ -146,7 +146,7 @@ Safety caps, all configurable, with the defaults from `.env.example`:
 - Agent orders: `apps/worker/src/tick.ts` and `apps/worker/src/execution.ts` (`placeOrder`). Order-type union: `packages/shared/src/types.ts`.
 - Template order types (`packages/policy/src/templates.ts`): Momentum enters with limit orders and may use trailing stops; Mean Reversion and Social Sentiment enter with limit orders; Breakout enters with stop-buys; Smart DCA enters with TWAP. Every template allows the exit types market, stop-loss, take-profit, and bracket.
 - Fill sync and order status: `apps/worker/src/stats.ts` (`syncOrderFills`).
-- Crash cancel and stop tightening: `apps/worker/src/crash.ts`. Live cancel and PATCH are not wired yet (see [Known gaps](#known-gaps)).
+- Crash cancel and stop tightening: `apps/worker/src/crash.ts`, using signed Flash cancel/update messages from `packages/flash/src/messages.ts`.
 - Manual trading terminal (user-signed orders): `apps/web/lib/server/flash.ts`, `apps/web/app/api/flash/{quote,order,orders}/route.ts`, `apps/web/components/trade/`.
 
 Onchain execution evidence (fill transaction hashes with BaseScan links): `<TBD: fill tx hashes>`
@@ -212,8 +212,7 @@ AI is also the product's decision engine. Each agent tick sends prices, indicato
 
 These are not implemented in the current code:
 
-- **Live cancel and stop changes.** Flash cancel and PATCH need a signed `cancelMessage`, which the repo does not produce. `apps/worker/src/runtime.ts` sets `orderControl: null`, so in live mode the HALT actions record an error instead of cancelling or tightening stops.
-- **Privy and Turnkey server wallets.** `PrivyWalletProvider` throws. Live agents need the dev-only local wallet.
+- **Turnkey server wallets.** Only Privy and the local dev provider exist. Privy has not been tested against the live API, and Privy wallets get no 0G wallet (that provisioning step is skipped).
 - **USDC settlement for the relayer.** The 0G side is implemented. The USDC-to-0G swap or rebalance is not.
 - **Payment Layer on testnet.** The mainnet deposit ABI is taken from the verified contract. The Galileo implementation is unverified (`packages/zerog/src/payment.ts`).
 - **Fork split as an env var.** `FORK_PLATFORM_BPS` is in the schema but not read at runtime. The web app shows a fixed 3000 bps, and the onchain split comes from `PLATFORM_BPS` at deploy.

@@ -17,7 +17,7 @@ Cell values: a stage letter means required for that stage. `opt` means optional.
 - **Contracts** read their config with `vm.env*` from the process environment, so export the variables in the shell that runs `forge`.
 - **Blank values** are dropped by the worker (`apps/worker/src/env.ts` trims and drops blanks, so defaults apply). The web app parses the shared schema without that step: a blank number becomes `0` and a blank enum such as `EXECUTION_MODE=` fails validation. Delete lines you do not use instead of leaving them empty.
 - **Secrets**: never put a secret in a `NEXT_PUBLIC_*` variable. Those values are inlined into the browser bundle at build time, so rebuild after changing them.
-- **Dev keys** (`DEV_AGENT_MNEMONIC`, `DEV_AGENT_PRIVATE_KEY`) hold funds. Use tiny balances and fresh keys. They are the only working signing path today (see section 6).
+- **Dev keys** (`DEV_AGENT_MNEMONIC`, `DEV_AGENT_PRIVATE_KEY`) hold funds. Use tiny balances and fresh keys. They sign only when `WALLET_PROVIDER=local` (the default). Production uses Privy server wallets with `WALLET_PROVIDER=privy` (section 6).
 
 ## 1. Platform limits and economics (root `.env`)
 
@@ -59,7 +59,7 @@ Read through `packages/shared/src/config.ts` (`EnvSchema`) by the worker runtime
 
 | Variable | Default | Req | Read by | Notes |
 |---|---|---|---|---|
-| `CHAIN` | `baseSepolia` (worker) | T, D | `apps/worker/src/env.ts`; `apps/worker/src/chain.ts` (token list, viem chain, RPC) | `base` or `baseSepolia`. **Must match `NEXT_PUBLIC_CHAIN`.** The worker defaults to Base Sepolia but the web app defaults to Base mainnet, so set both. |
+| `CHAIN` | `baseSepolia` (worker) | T, D | `apps/worker/src/env.ts`; `apps/worker/src/chain.ts` (token list, viem chain, RPC, and the CAIP-2 id Privy signs for: `eip155:84532` or `eip155:8453`) | `base` or `baseSepolia`. **Must match `NEXT_PUBLIC_CHAIN`.** The worker defaults to Base Sepolia but the web app defaults to Base mainnet, so set both. |
 | `BASE_RPC_URL` | `https://mainnet.base.org` | D | config.ts; `apps/worker/src/chain.ts`; `apps/web/lib/server/chain.ts` (fork verification); `contracts/foundry.toml` (`base` endpoint) | Use a private RPC for the demo. The public endpoint rate-limits. Get one from your RPC provider. |
 | `BASE_SEPOLIA_RPC_URL` | `https://sepolia.base.org` | T | same as above (`base_sepolia` endpoint in foundry.toml) | Public endpoint, fine for rehearsal. |
 | `PERF_REGISTRY_FROM_BLOCK` | `0` | T, D | `apps/worker/src/env.ts`; `runtime.ts` → `stats.ts` | First block scanned for `PerformanceReported` logs. Set it to the PerformanceRegistry deploy block to avoid scanning from genesis. |
@@ -96,19 +96,63 @@ Flash's API and WebSocket base URLs (`https://flash.definitive.fi/v1`, `wss://fl
 | `RELAYER_CURSOR_FILE` | `.relayer-cursor.json` | opt | `apps/worker/src/env.ts` → relayer | Last processed Base block (gitignored). |
 | `INSIGHT_RSS_FEEDS` | built-in list in `apps/worker/src/insights/sources.ts` (`DEFAULT_RSS_FEEDS`) | opt | `apps/worker/src/env.ts` → `runtime.ts` → `RssCollector` (insight digests, PRD 6.8) | Comma-separated http(s) feed URLs. Blank uses the defaults. Entries that are not http(s) URLs are dropped. Digests are built with 0G, so they count against the 0G budget. |
 
+Every 0G call the worker makes is written to `inference_calls` with its purpose: `decision` (tick), `digest` (insights) or `reflection` (lessons and slider suggestions). The budget tiers and `AGENT_DAILY_0G_CAP` sum all of them, so reflection spend counts toward the same budget as decisions.
+
 Payment Layer addresses are constants in `packages/shared/src/chains.ts`, not env variables. Mainnet: `0xA3b15Bd2aD18BFB6b5f92D8AA9F444Dd59d1cE32` (verified implementation). Testnet: `0x0AD9690e0b34aB2d493DE02cDF149ee34f6C9939` (implementation unverified, see `packages/zerog/src/payment.ts`).
 
 ## 6. Keys and wallets (worker)
 
+`WALLET_PROVIDER` chooses who signs for agent trading wallets. Each agent has one trading wallet. It signs Flash orders (EIP-712), Flash cancel and update messages (EIP-191), and the USDC approval to AgentTreasury.
+
 | Variable | Default | Req | Read by | Notes and how to get it |
 |---|---|---|---|---|
-| `DEV_AGENT_MNEMONIC` | none | T, D (until Privy) | `apps/worker/src/runtime.ts` → `LocalWalletProvider` (`wallets.ts`) | BIP-39 phrase. Trading wallet per agent at `m/44'/60'/0'/0/<index>`, 0G wallet on branch 1. Takes precedence over `DEV_AGENT_PRIVATE_KEY`. **How:** generate a fresh 12-word phrase offline, with a hardware wallet or a BIP-39 tool. Never reuse a wallet that holds other funds. |
-| `DEV_AGENT_PRIVATE_KEY` | none | T, D (alternative) | `apps/worker/src/runtime.ts` → `LocalWalletProvider` | `0x` + 64 hex. One shared trading key. Per-agent 0G keys are derived by hashing it, so anyone with this key controls every dev agent. **How:** `cast wallet new` (Foundry). |
+| `WALLET_PROVIDER` | `local` | L (local), D (privy) | `apps/worker/src/runtime.ts` (`walletProviderFor`) | `local` derives keys from `DEV_AGENT_*` in the worker process. Dev and paper only. `privy` uses Privy server wallets (below). With `privy`, startup fails unless `PRIVY_APP_ID` and `PRIVY_APP_SECRET` are set. Without any dev key, `local` still starts, and each wallet call fails with a clear message. |
+| `DEV_AGENT_MNEMONIC` | none | L, T (local only) | `apps/worker/src/runtime.ts` → `LocalWalletProvider` (`wallets.ts`) | BIP-39 phrase. Trading wallet per agent at `m/44'/60'/0'/0/<index>`, 0G wallet on branch 1. Takes precedence over `DEV_AGENT_PRIVATE_KEY`. **How:** generate a fresh 12-word phrase offline, with a hardware wallet or a BIP-39 tool. Never reuse a wallet that holds other funds. |
+| `DEV_AGENT_PRIVATE_KEY` | none | L, T (local only) | `apps/worker/src/runtime.ts` → `LocalWalletProvider` | `0x` + 64 hex. One shared trading key. Per-agent 0G keys are derived by hashing it, so anyone with this key controls every dev agent. **How:** `cast wallet new` (Foundry). |
+| `PRIVY_APP_ID` | none | D (privy) | `apps/worker/src/runtime.ts` → `PrivyClient` | From the Privy dashboard, app settings. The SDK calls Privy's production API, so create the app there. |
+| `PRIVY_APP_SECRET` | none | D (privy) | `apps/worker/src/runtime.ts` → `PrivyClient` | From the Privy dashboard, with the app id. Server-only. Never put it in a `NEXT_PUBLIC_*` variable. |
+| `PRIVY_AUTHORIZATION_KEY` | none | D (recommended) | `apps/worker/src/privy-wallets.ts` | Base64 PKCS8 P-256 private key, no PEM headers. When set, the worker makes its public key the owner of each new agent wallet and signs every wallet call with it, so the app secret alone cannot move funds. Wallets created without it have no owner. **Generate:** `openssl ecparam -name prime256v1 -genkey -noout -out privy-auth.pem` then `openssl pkcs8 -topk8 -nocrypt -in privy-auth.pem -outform DER \| base64 \| tr -d '\n'`. Keep `privy-auth.pem` in your secret manager and out of git. |
+| `PRIVY_POLICY_ID` | none | D (privy) | `apps/worker/src/privy-wallets.ts` (wallet creation) | The policy created below. Attached to each wallet the worker creates after it is set. |
 | `OPERATOR_PRIVATE_KEY` | none | T, D | `apps/worker/src/runtime.ts` → provisioner (`updateConfig`, and registration stores its address as the agent operator); `economics/treasury.ts` (`collectCommission`, `topUp`) | `0x` + 64 hex. Needs Base ETH for gas. **How:** `cast wallet new`, then fund on Base Sepolia (faucet) or Base. |
 | `PLATFORM_ADMIN_PRIVATE_KEY` | none | T, D | `apps/worker/src/runtime.ts` → registry writer (`AgentRegistry.register`) | `0x` + 64 hex. Must be the `platform` address on AgentRegistry. The deployer is `platform` by default. Otherwise the owner calls `setPlatform`. Needs Base ETH. |
-| `PRIVY_APP_ID`, `PRIVY_APP_SECRET`, `TURNKEY_*` | n/a | not used | Not read by any code | `PrivyWalletProvider` in `apps/worker/src/wallets.ts` is a stub that throws. Server wallets with policies (PRD 7.4) are future work. Do not add these until the provider exists. |
 
 Trading wallets need Base ETH for gas, because provisioning step f sends the USDC approval from the trading wallet and waits for gas.
+
+### Privy setup (team steps, D only)
+
+The worker provider uses `@privy-io/node` (`apps/worker/src/privy-wallets.ts`). It creates one Ethereum wallet per agent, stores the Privy wallet id in the agent's provisioning data, and then signs through Privy's RPC:
+
+| Signing | Privy method | Used for |
+|---|---|---|
+| `OrderSigner.signTypedData` | `eth_signTypedData_v4` | Flash orders |
+| `MessageSigner.signMessage` | `personal_sign` (raw UTF-8 bytes) | Flash cancel and update messages |
+| `TradingSender.sendTransaction` | `eth_sendTransaction` on `eip155:84532` (Base Sepolia) or `eip155:8453` (Base) | USDC approve to AgentTreasury |
+
+1. Create the Privy app. Set `PRIVY_APP_ID` and `PRIVY_APP_SECRET`.
+2. Generate the authorization key (the `PRIVY_AUTHORIZATION_KEY` commands above). Print its public key with `openssl pkey -in privy-auth.pem -pubout -outform DER | base64 | tr -d '\n'`, and register that key as an authorization key in the Privy dashboard. The worker derives the same public key from `PRIVY_AUTHORIZATION_KEY` and sets it as the wallet owner.
+3. Create the policy (below). Copy its id into `PRIVY_POLICY_ID`.
+4. Set `WALLET_PROVIDER=privy`. Run `cd apps/worker && bun --env-file=../../.env src/index.ts provision <agentId>` for each agent. Step a creates the trading wallet. Step f sends the approve from it.
+5. Fund each trading wallet with Base ETH (gas for the approve) and USDC.
+
+Wallets created before `PRIVY_POLICY_ID` or `PRIVY_AUTHORIZATION_KEY` was set have no policy or owner. The worker does not update them. Attach the policy in the dashboard, or set it with the Privy wallets API.
+
+### Privy policy to create (manual)
+
+The team creates this policy in the Privy dashboard, or through the Privy policies API. Privy's policy types (`@privy-io/node` `resources/policies`) support every condition below: `ethereum_typed_data_domain`, `ethereum_typed_data_message`, `message`, `ethereum_transaction` and `ethereum_calldata`. The field names are the ones the dashboard shows. Confirm them there when you create the rules, and test each rule before the demo.
+
+| # | Method | Action | Conditions | Allows |
+|---|---|---|---|---|
+| 1 | `eth_signTypedData_v4` | ALLOW | `chainId` in `[8453, 84532]`; `verifyingContract` equals the Flash verifying contract (copy it from a Flash quote on the target chain); `primary_type` equals the Flash order type | Flash order typed data only |
+| 2 | `personal_sign` | ALLOW | message `content` starts with `Definitive Flash` | Flash cancel and update messages only |
+| 3 | `eth_sendTransaction` | ALLOW | `to` equals the USDC address; calldata `approve(address,uint256)`: `spender` in `[Permit2, AgentTreasury]` and `amount` at most `MAX_AGENT_ALLOCATION_USD` in USD6 | USDC approvals to Permit2 or AgentTreasury, capped |
+| 4 | `eth_sendTransaction` | ALLOW | `to` equals the agent owner address, with no calldata; or USDC calldata `transfer(address,uint256)` with `to` equal to the owner address | Transfers to the owner only |
+
+Rules for the policy:
+
+- **No catch-all rule.** Anything without a matching ALLOW is denied. Confirm in the dashboard that the policy denies unmatched requests before you rely on it.
+- **Signing other typed data is refused.** Rule 1 rejects any other domain, for example a permit or a different contract.
+- **Approvals for other tokens are refused.** The worker sends no approval for WETH or cbBTC. `packages/flash/src/signing.ts` (`buildApprovalTx`) only returns calldata. If Flash requires a Permit2 approval for a traded token, add a rule for that token and that spender, with a cap.
+- **The Flash domain is taken from Flash, not from this repo.** Flash returns the domain in its typed data. Copy `name`, `chainId` and `verifyingContract` from a quote on the target chain.
 
 ## 7. Contracts (Base)
 
@@ -228,11 +272,16 @@ The web app also reads these server-side variables from the root `.env`: `DATABA
 
 The bot also needs `DATABASE_URL` (or `PGLITE_DIR`) as in section 2.
 
-## 11. Not used, or missing from `.env.example`
+## 11. Variables in `.env.example`
 
-Declared but not read at runtime: `FORK_PLATFORM_BPS` (section 1).
+`.env.example` lists every variable that the worker, the web app, the Telegram bot, the CRE workflows and the Foundry scripts read. Its groups follow the sections above: platform, database, chain, Flash, 0G, wallets, onchain addresses, web, Telegram, and tools that read the file but not through the worker.
 
-Read by code but not in `.env.example`: `DEV_AGENT_MNEMONIC`, `OPERATOR_PRIVATE_KEY`, `PLATFORM_ADMIN_PRIVATE_KEY`, `RELAYER_ZG_PRIVATE_KEY`, `ZG_MGMT_KEY`, `AGENT_KEY_ENCRYPTION_KEY`, `ZG_RPC_URL`, `ZG_STORAGE_INDEXER`, `ZG_PRIVATE_KEY`, `ZG_PER_USDC`, `AGENT_SEED_CREDIT_0G`, `AGENT_DAILY_0G_CAP`, `INSIGHT_RSS_FEEDS`, `REGISTRY_ADDRESS`, `TREASURY_ADDRESS`, `PERF_REGISTRY_ADDRESS`, `RISK_ORACLE_ADDRESS`, `PERF_REGISTRY_FROM_BLOCK`, `LOG_CHUNK_BLOCKS`, `CHAIN`, `WORKER_MAX_CONCURRENCY`, `RELAYER_MAX_REQUEST_USD`, `RELAYER_POLL_SEC`, `RELAYER_CURSOR_FILE`, `DB_POOLED`, `PGLITE_DIR`, `SESSION_SECRET`, `NEXT_PUBLIC_CHAIN`, `NEXT_PUBLIC_MARKETPLACE_ADDRESS`, `NEXT_PUBLIC_TREASURY_ADDRESS`, `NEXT_PUBLIC_USDC_ADDRESS`, `NEXT_PUBLIC_BASE_EXPLORER`, `NEXT_PUBLIC_WC_PROJECT_ID`, `NEXT_PUBLIC_TELEGRAM_BOT`, `WEB_URL`, `BASESCAN_URL`, `ZG_EXPLORER_URL`, `TG_STATE_FILE`, and the Foundry and CRE variables. Add the ones you use.
+Not read at runtime:
+
+- `FORK_PLATFORM_BPS` is declared in the shared schema (section 1) but nothing reads it. It is left out of `.env.example`.
+- `RELAYER_PRIVATE_KEY` is not read by any code. The relayer key is `RELAYER_ZG_PRIVATE_KEY` (section 5). Do not set `RELAYER_PRIVATE_KEY`.
+
+Read by tools outside the worker and the web app: `CRE_ETH_PRIVATE_KEY` (the CRE CLI, section 8), and the Foundry deploy inputs and `BASESCAN_API_KEY` (section 7). The CRE secrets come from `cre/secrets.yaml`, so `FLASH_API_KEY` and `ZG_API_KEY` in the root `.env` are for the worker and web app.
 
 ## 12. Go-live order of operations
 
@@ -243,10 +292,10 @@ Keep `EXECUTION_MODE=paper` until step 9.
 3. **Set forwarder and platform.** Keep the simulation forwarder for the rehearsal. Before mainnet, call `setForwarder` on PerformanceRegistry and RiskOracle with the production forwarder. If `PLATFORM_ADMIN_PRIVATE_KEY` is not the deployer, call `setPlatform`.
 4. **Configure CRE.** Fill the WF1 and WF2 configs (section 8), run `cre login`, then simulate both workflows on staging with `--broadcast`. Confirm the report lands in PerformanceRegistry and RiskOracle. If the mock forwarder does not call `onReport`, the attestation fallback is a relayed report, and you must disclose it.
 5. **Fund the relayer float.** Send 0G to the `RELAYER_ZG_PRIVATE_KEY` address. Set `ZG_RPC_URL` and `TREASURY_ADDRESS`, then run `bun run --filter @arena/worker relayer`.
-6. **Onboard demo agents.** Set `ZG_MGMT_KEY` and `AGENT_KEY_ENCRYPTION_KEY`. Run provisioning for each agent: `cd apps/worker && bun --env-file=../../.env src/index.ts provision <agentId>`. That creates the trading wallet and 0G wallet, mints the capped 0G key (`AGENT_DAILY_0G_CAP`), registers the agent, syncs its config, and sets the USDC allowance. Then fund the trading wallet with Base ETH and USDC. The code creates 0G keys only through `ZG_MGMT_KEY`. Keys created by hand in the pc.0g.ai console have no import path in the worker, so manual onboarding is a fallback only.
+6. **Onboard demo agents.** Set `WALLET_PROVIDER` (`privy` for the demo, with the Privy steps in section 6), `ZG_MGMT_KEY` and `AGENT_KEY_ENCRYPTION_KEY`. Run provisioning for each agent: `cd apps/worker && bun --env-file=../../.env src/index.ts provision <agentId>`. That creates the trading wallet and 0G wallet, mints the capped 0G key (`AGENT_DAILY_0G_CAP`), registers the agent, syncs its config, and sets the USDC allowance. Then fund the trading wallet with Base ETH and USDC. The code creates 0G keys only through `ZG_MGMT_KEY`. Keys created by hand in the pc.0g.ai console have no import path in the worker, so manual onboarding is a fallback only.
 7. **Rehearse the self-funding loop on testnet.** Run `cd apps/worker && bun run tick <agentId>`, then confirm the commission collection, the top-up, the relayer deposit, and the next request IDs being billed. Record each tx hash.
 8. **Deploy to Base mainnet.** Repeat step 2 with `--rpc-url base`. Set `NETWORK=mainnet`, `CHAIN=base`, `NEXT_PUBLIC_CHAIN=base`, the mainnet `NEXT_PUBLIC_*` addresses, and a private `BASE_RPC_URL`. Flash has no testnet, so live orders settle on mainnet, and the contracts must be on mainnet for a real commission.
 9. **Switch to live with tiny caps.** Set `EXECUTION_MODE=live`, keep `GLOBAL_KILL_SWITCH=false`, and keep `MAX_TRADE_USD=1` and the other defaults. Check that `/api/platform` reports `flashLive: true`. Run one $1 order and confirm the fill on BaseScan.
-10. **Rehearse the crash path.** Trigger `simulate-crash` on WF2 and watch the worker logs. In live mode, cancels and stop changes record an error, because Flash cancel and PATCH are not wired (see the README's known gaps). Plan the demo around this, or keep the demo to paper mode for that beat.
+10. **Rehearse the crash path.** Trigger `simulate-crash` on WF2 and watch the worker logs. In live mode, a HALT cancels pending entries and tightens stops with Flash cancel and PATCH messages. Each message is signed by the agent's trading wallet: a dev key (`WALLET_PROVIDER=local`) or Privy (`WALLET_PROVIDER=privy`). That needs `DEFINITIVE_API_KEY`. Without Flash signing, each live cancel or stop change records an error on its episode. Flatten sells go through the policy engine and the executor like any other order.
 11. **Record evidence for the README.** Commission tx, top-up tx, 0G deposit tx, first paid request ID, CRE report tx hashes, and the BaseScan links for the fills.
 12. **Stop switch.** If anything looks wrong, set `GLOBAL_KILL_SWITCH=true` and restart the worker. New orders stop, and pending entries are cancelled.

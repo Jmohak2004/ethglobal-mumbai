@@ -3,7 +3,7 @@
 
 import type { Db } from "@arena/db";
 import type { ExecutionMode, GlobalLimits, Agent, BudgetTier, MarketSnapshot, RiskLevel } from "@arena/shared";
-import type { FlashExecutor } from "@arena/flash";
+import type { FlashExecutor, OrderControl } from "@arena/flash";
 import type { ZeroGRouter } from "@arena/zerog";
 import type { Logger } from "./logger.ts";
 import type { WalletProvider } from "./wallets.ts";
@@ -30,15 +30,6 @@ export interface RiskReading {
 export interface RiskSource {
   current(): Promise<RiskLevel>;
   reading(): Promise<RiskReading>;
-}
-
-/**
- * Order management on Flash for live orders: cancel an open order, and move the stop-loss attached to an
- * open order. Each call must be signed by the agent's wallet, so the implementation owns the signing.
- */
-export interface EntryOrderControl {
-  cancelOrder(orderId: string, funderAddress: string): Promise<void>;
-  setStopLoss(orderId: string, funderAddress: string, stopLossPrice: number): Promise<void>;
 }
 
 export interface BudgetReading {
@@ -77,10 +68,11 @@ export interface Deps {
   wallets: WalletProvider;
   executor: Pick<FlashExecutor, "execute">;
   /**
-   * Live order management (cancel, stop-loss). Null or omitted when Flash signing for these calls is not
-   * configured: live cancel and stop steps then record an error on their episode instead of acting.
+   * Live order management for one agent (PRD 6.5): signed cancel and stop changes through Flash, with the agent's
+   * message signer. Null or omitted when Flash is not configured: live cancel and stop steps then record an error
+   * on their episode instead of acting.
    */
-  orderControl?: EntryOrderControl | null;
+  orderControlFor?: ((agent: Agent) => Promise<OrderControl>) | null;
   /** Returns the inference router for an agent. Throws when no decision key is configured. */
   routerFor(agent: Agent): ZeroGRouter;
   /**

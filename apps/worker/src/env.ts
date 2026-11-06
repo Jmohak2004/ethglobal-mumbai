@@ -9,10 +9,26 @@ const privateKey = z.string().regex(/^0x[0-9a-fA-F]{64}$/, "must be a 0x-prefixe
 const num = (d: number) => z.coerce.number().default(d);
 
 export const WorkerEnvSchema = EnvSchema.extend({
+  /**
+   * Who signs for agent trading wallets. "local" derives keys from DEV_AGENT_* (dev only). "privy" uses Privy server
+   * wallets with policies (PRD 7.4). Startup fails on "privy" without PRIVY_APP_ID and PRIVY_APP_SECRET.
+   */
+  WALLET_PROVIDER: z.enum(["local", "privy"]).default("local"),
   /** Dev-only: derive one trading account per agent from this mnemonic (LocalWalletProvider). */
   DEV_AGENT_MNEMONIC: z.string().optional(),
   /** Dev-only: one shared trading key for every agent (LocalWalletProvider). */
   DEV_AGENT_PRIVATE_KEY: privateKey.optional(),
+  /** Privy app id (WALLET_PROVIDER=privy). */
+  PRIVY_APP_ID: z.string().optional(),
+  /** Privy app secret (WALLET_PROVIDER=privy). Server-only. */
+  PRIVY_APP_SECRET: z.string().optional(),
+  /**
+   * Base64 PKCS8 P-256 private key that authorizes wallet calls. When set, it becomes the owner of each new agent
+   * wallet, and every wallet call is signed with it. Create it in the Privy dashboard (docs/SETUP.md).
+   */
+  PRIVY_AUTHORIZATION_KEY: z.string().optional(),
+  /** Privy policy id attached to each new agent wallet. The policy is created in the Privy dashboard (docs/SETUP.md). */
+  PRIVY_POLICY_ID: z.string().optional(),
   /** 0G management key (`mk-…`). Enables real per-account balances via ZeroGAccount, and per-agent capped keys. */
   ZG_MGMT_KEY: z.string().optional(),
   /** 32-byte hex key (AES-256-GCM) that encrypts per-agent 0G secrets at rest. Required to mint or use them. */
@@ -54,9 +70,14 @@ export const WorkerEnvSchema = EnvSchema.extend({
   /** JSON file holding the last processed Base block of TopUpRequested logs. */
   RELAYER_CURSOR_FILE: z.string().default(".relayer-cursor.json"),
 
+  /** Base chain for Flash, USDC, the registry and treasury. Must match NEXT_PUBLIC_CHAIN in the web app. */
   CHAIN: z.enum(["base", "baseSepolia"]).default("baseSepolia"),
   WORKER_MAX_CONCURRENCY: z.coerce.number().int().positive().default(3),
   PGLITE_DIR: z.string().optional(),
+}).superRefine((env, ctx) => {
+  if (env.WALLET_PROVIDER !== "privy") return;
+  if (!env.PRIVY_APP_ID) ctx.addIssue({ code: "custom", path: ["PRIVY_APP_ID"], message: "required when WALLET_PROVIDER=privy" });
+  if (!env.PRIVY_APP_SECRET) ctx.addIssue({ code: "custom", path: ["PRIVY_APP_SECRET"], message: "required when WALLET_PROVIDER=privy" });
 });
 
 export type WorkerEnv = z.infer<typeof WorkerEnvSchema>;

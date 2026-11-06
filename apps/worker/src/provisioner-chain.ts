@@ -1,11 +1,12 @@
 // Viem adapters for the provisioner: AgentRegistry reads and writes, and the USDC allowance. Every write waits
 // for its receipt and throws when the transaction reverted, so a returned hash always means success.
 
-import { createPublicClient, createWalletClient, http, parseAbi, type Hex } from "viem";
+import { createPublicClient, createWalletClient, encodeFunctionData, http, parseAbi, type Hex } from "viem";
 import { privateKeyToAccount, type LocalAccount } from "viem/accounts";
 import { AGENT_REGISTRY_ABI } from "./abi.ts";
 import type { ChainConfig } from "./chain.ts";
 import type { AllowanceWriter, OnchainAgentRecord, RegistryWriter } from "./provisioner.ts";
+import type { TxRequest } from "./wallets.ts";
 
 const ERC20_ABI = parseAbi([
   "function allowance(address owner, address spender) view returns (uint256)",
@@ -69,6 +70,18 @@ export function createViemRegistryWriter(opts: {
   };
 }
 
+/**
+ * Sends a transaction from a local key on the configured chain (LocalWalletProvider's sendTransaction). Resolves with
+ * the hash as soon as the node accepts it. The allowance writer waits for the receipt.
+ */
+export function createViemLocalSend(chain: ChainConfig): (account: LocalAccount, tx: TxRequest) => Promise<Hex> {
+  const { viemChain, rpcUrl } = chain;
+  return async (account, tx) => {
+    const wallet = createWalletClient({ account, chain: viemChain, transport: http(rpcUrl) });
+    return wallet.sendTransaction({ to: tx.to, data: tx.data, value: tx.value ?? 0n });
+  };
+}
+
 export function createViemAllowanceWriter(opts: { chain: ChainConfig; usdc: Hex }): AllowanceWriter {
   const { viemChain, rpcUrl } = opts.chain;
   const publicClient = createPublicClient({ chain: viemChain, transport: http(rpcUrl) });
@@ -87,14 +100,9 @@ export function createViemAllowanceWriter(opts: { chain: ChainConfig; usdc: Hex 
       })) as bigint;
     },
 
-    async approve(account: LocalAccount, spender, amountUsd6) {
-      const wallet = createWalletClient({ account, chain: viemChain, transport: http(rpcUrl) });
-      const hash = await wallet.writeContract({
-        address: opts.usdc,
-        abi: ERC20_ABI,
-        functionName: "approve",
-        args: [spender, amountUsd6],
-      });
+    async approve(from, spender, amountUsd6) {
+      const data = encodeFunctionData({ abi: ERC20_ABI, functionName: "approve", args: [spender, amountUsd6] });
+      const hash = await from.sendTransaction({ to: opts.usdc, data });
       const receipt = await publicClient.waitForTransactionReceipt({ hash });
       if (receipt.status !== "success") throw new Error(`USDC approve reverted (tx ${hash})`);
       return hash;

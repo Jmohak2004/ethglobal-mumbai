@@ -2,11 +2,12 @@
 // Missing keys do not stop startup: each feature reports its own "not configured" error when it is used.
 
 import { closeDb, createDb, getAgent, listPublic, type Db } from "@arena/db";
-import { FlashClient, FlashExecutor } from "@arena/flash";
+import { createOrderControl, FlashClient, FlashExecutor, type OrderControl } from "@arena/flash";
 import { globalLimitsFromEnv, ZG_ROUTER_URL, type Agent } from "@arena/shared";
 import { NoopMemoryStore, ZeroGAccount, ZeroGRouter, ZeroGStorage, type MemoryStore } from "@arena/zerog";
+import { PrivyClient } from "@privy-io/node";
 import type { Hex } from "viem";
-import { chainConfigFor, publicClientFor, type ChainConfig } from "./chain.ts";
+import { caip2For, chainConfigFor, publicClientFor, type ChainConfig } from "./chain.ts";
 import type { WorkerEnv } from "./env.ts";
 import { createBudgetSource } from "./budget.ts";
 import { createMarketData, chainlinkFeedReader } from "./market.ts";
@@ -16,11 +17,12 @@ import { createPerfChain, type PerfChain } from "./stats.ts";
 import { createTreasury, treasuryChainFromEnv, type Treasury } from "./economics/treasury.ts";
 import { coingeckoZgUsd, createViemRelayerChain, fileCursorStore, type RelayerOptions } from "./economics/relayer.ts";
 import { registryReader, type RegistrationReader } from "./registry.ts";
-import { LocalWalletProvider, PrivyWalletProvider, type WalletProvider } from "./wallets.ts";
+import { LocalWalletProvider, UnconfiguredWalletProvider, type WalletProvider } from "./wallets.ts";
+import { PrivyWalletProvider, privyStoreFromDb, type PrivyServerClient } from "./privy-wallets.ts";
 import { systemClock, type Clock, type Deps } from "./deps.ts";
 import type { ReflectionDeps } from "./reflection.ts";
 import type { ProvisionDeps, RegistryWriter } from "./provisioner.ts";
-import { createViemAllowanceWriter, createViemRegistryWriter } from "./provisioner-chain.ts";
+import { createViemAllowanceWriter, createViemLocalSend, createViemRegistryWriter } from "./provisioner-chain.ts";
 import { parseEncryptionKey } from "./secrets.ts";
 import { createAgentRouterFor } from "./inference-router.ts";
 import { createInsightProducer, type InsightProducer } from "./insights/producer.ts";
@@ -77,6 +79,32 @@ const missingFlashClient: Pick<FlashClient, "quote" | "submitOrder"> = {
   },
 };
 
+/**
+ * The trading-wallet provider for WALLET_PROVIDER. Privy wallets are keyed by the stored Privy id in the agent's
+ * provisioning jsonb. Local wallets come from the DEV_AGENT_* keys, and local approvals are sent on the configured chain.
+ */
+export function walletProviderFor(env: WorkerEnv, deps: { db: Db; chain: ChainConfig }): WalletProvider {
+  if (env.WALLET_PROVIDER === "privy") {
+    if (!env.PRIVY_APP_ID || !env.PRIVY_APP_SECRET) throw new Error("WALLET_PROVIDER=privy needs PRIVY_APP_ID and PRIVY_APP_SECRET");
+    const client = new PrivyClient({ appId: env.PRIVY_APP_ID, appSecret: env.PRIVY_APP_SECRET });
+    return new PrivyWalletProvider({
+      client: client as unknown as PrivyServerClient,
+      store: privyStoreFromDb(deps.db),
+      caip2: caip2For(deps.chain),
+      policyId: env.PRIVY_POLICY_ID,
+      authorizationKey: env.PRIVY_AUTHORIZATION_KEY,
+    });
+  }
+  if (env.DEV_AGENT_MNEMONIC || env.DEV_AGENT_PRIVATE_KEY) {
+    return new LocalWalletProvider({
+      mnemonic: env.DEV_AGENT_MNEMONIC,
+      privateKey: env.DEV_AGENT_PRIVATE_KEY as Hex | undefined,
+      sendTransaction: createViemLocalSend(deps.chain),
+    });
+  }
+  return new UnconfiguredWalletProvider("WALLET_PROVIDER=local needs DEV_AGENT_MNEMONIC or DEV_AGENT_PRIVATE_KEY");
+}
+
 export function createRuntime(env: WorkerEnv, overrides: RuntimeOverrides = {}): Runtime {
   const logger = overrides.logger ?? createLogger();
   const clock = overrides.clock ?? systemClock;
@@ -98,13 +126,20 @@ export function createRuntime(env: WorkerEnv, overrides: RuntimeOverrides = {}):
   const zgAccount = env.ZG_MGMT_KEY ? new ZeroGAccount({ mgmtKey: env.ZG_MGMT_KEY, baseUrl: zgBaseUrl }) : null;
   const budget = createBudgetSource({ db, clock, seedCredit0G: env.AGENT_SEED_CREDIT_0G, account: zgAccount, logger });
 
-  const wallets: WalletProvider =
-    env.DEV_AGENT_MNEMONIC || env.DEV_AGENT_PRIVATE_KEY
-      ? new LocalWalletProvider({ mnemonic: env.DEV_AGENT_MNEMONIC, privateKey: env.DEV_AGENT_PRIVATE_KEY as Hex | undefined })
-      : new PrivyWalletProvider();
+  const wallets: WalletProvider = walletProviderFor(env, { db, chain });
 
   const flash = env.DEFINITIVE_API_KEY ? new FlashClient({ apiKey: env.DEFINITIVE_API_KEY }) : null;
   const executor = new FlashExecutor({ client: flash ?? missingFlashClient, integratorFeeBps: env.FLASH_INTEGRATOR_FEE_BPS, tokens: chain.tokens });
+  // Live cancels and stop moves are signed by the agent's message signer (EIP-191), and the signer must be the trading wallet.
+  const orderControlFor = flash
+    ? async (agent: Agent): Promise<OrderControl> => {
+        const signer = await wallets.messageSignerFor(agent);
+        if (signer.address.toLowerCase() !== agent.tradingWallet.toLowerCase()) {
+          throw new Error(`message signer ${signer.address} does not match the agent trading wallet ${agent.tradingWallet}`);
+        }
+        return createOrderControl(flash, signer);
+      }
+    : null;
 
   let router: ZeroGRouter | null = null;
   const routerFor = (): ZeroGRouter => {
@@ -179,9 +214,7 @@ export function createRuntime(env: WorkerEnv, overrides: RuntimeOverrides = {}):
     routerFor,
     agentRouterFor,
     insights,
-    // Flash cancel and PATCH need signed messages that this repo does not define yet (see crash.ts). Until
-    // an implementation is supplied, live cancels and stop changes fail with a recorded error.
-    orderControl: null,
+    orderControlFor,
   };
 
   return {

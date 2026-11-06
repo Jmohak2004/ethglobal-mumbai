@@ -25,12 +25,11 @@ import { agentIdToBytes32, toUsd6, type Agent, type TemplateId } from "@arena/sh
 import type { CreatedKey, CreateCappedKeyInput } from "@arena/zerog";
 import { createHash } from "node:crypto";
 import type { Hex } from "viem";
-import type { LocalAccount } from "viem/accounts";
 import type { Clock } from "./deps.ts";
 import type { Logger } from "./logger.ts";
 import { silentLogger } from "./logger.ts";
 import { decryptSecret, encryptSecret } from "./secrets.ts";
-import type { WalletProvider } from "./wallets.ts";
+import type { TradingSender, WalletProvider } from "./wallets.ts";
 
 /** Retry delay while the trading wallet has no ETH for the approve. */
 export const GAS_RETRY_MS = 60_000;
@@ -83,12 +82,13 @@ export interface RegistryWriter {
   updateConfig(agentIdBytes32: Hex, configHash: Hex): Promise<Hex>;
 }
 
-/** Base-side reads and the USDC approve for the trading wallet. */
+/** Base-side reads and the USDC approve. The approve is sent by the trading wallet, local or Privy. */
 export interface AllowanceWriter {
   ethBalance(address: Hex): Promise<bigint>;
   /** USDC allowance from owner to spender, in USD6. */
   allowance(owner: Hex, spender: Hex): Promise<bigint>;
-  approve(account: LocalAccount, spender: Hex, amountUsd6: bigint): Promise<Hex>;
+  /** approve(spender, amount) sent from `from`. Resolves once the receipt succeeded, with the tx hash. */
+  approve(from: TradingSender, spender: Hex, amountUsd6: bigint): Promise<Hex>;
 }
 
 export interface ProvisionDeps {
@@ -127,7 +127,7 @@ export function provisioningRequirements(deps: ProvisionDeps): ProvisioningRequi
     zgWallet: typeof deps.wallets.zgAddressFor === "function",
     zgKey: Boolean(deps.zgAccount && deps.encryptionKey),
     registration: Boolean(deps.registry),
-    allowance: Boolean(deps.allowance && deps.treasury && typeof deps.wallets.localAccountFor === "function"),
+    allowance: Boolean(deps.allowance && deps.treasury && typeof deps.wallets.tradingSenderFor === "function"),
   };
 }
 
@@ -278,24 +278,24 @@ export async function provisionAgent(deps: ProvisionDeps, agent: Agent, opts: { 
     let waiting = false;
     const treasury = deps.treasury;
     const allowance = deps.allowance;
-    const localAccountFor = deps.wallets.localAccountFor?.bind(deps.wallets);
+    const tradingSenderFor = deps.wallets.tradingSenderFor?.bind(deps.wallets);
     const cap = toUsd6(current.config.limits.maxAllocationUsd);
-    if (!allowance || !treasury || !localAccountFor) {
+    if (!allowance || !treasury || !tradingSenderFor) {
       result.steps.allowance = "skipped";
     } else if (state.allowanceAt && state.allowanceCapUsd6 === cap.toString()) {
       result.steps.allowance = "already";
     } else {
-      const account = localAccountFor(current);
-      if ((await allowance.allowance(account.address, treasury)) >= cap) {
+      const sender = await tradingSenderFor(current);
+      if ((await allowance.allowance(sender.address, treasury)) >= cap) {
         await save({ allowanceAt: now, allowanceCapUsd6: cap.toString(), needsGas: false });
         result.steps.allowance = "already";
-      } else if ((await allowance.ethBalance(account.address)) === 0n) {
+      } else if ((await allowance.ethBalance(sender.address)) === 0n) {
         await save({ needsGas: true });
         waiting = true;
         result.steps.allowance = "waiting";
-        log.info("allowance waits for gas", { wallet: account.address });
+        log.info("allowance waits for gas", { wallet: sender.address });
       } else {
-        const txHash = await allowance.approve(account, treasury, cap);
+        const txHash = await allowance.approve(sender, treasury, cap);
         await save({ allowanceTx: txHash, allowanceAt: now, allowanceCapUsd6: cap.toString(), needsGas: false });
         result.steps.allowance = "done";
       }

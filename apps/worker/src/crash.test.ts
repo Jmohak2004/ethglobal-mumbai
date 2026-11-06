@@ -1,7 +1,8 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { closeDb, insertFills, upsertOrder, type Db } from "@arena/db";
+import { createOrderControl, type FlashClient, type MessageSigner } from "@arena/flash";
 import type { Agent } from "@arena/shared";
-import { createCrashGuard, runHaltActions, cancelPendingEntries, HALT_REASON } from "./crash.ts";
+import { createCrashGuard, runHaltActions, cancelPendingEntries, formatPrice, HALT_REASON } from "./crash.ts";
 import { loadAgentState } from "./execution.ts";
 import {
   fakeMarket,
@@ -12,8 +13,67 @@ import {
   memoryDb,
   NOW,
   seedAgent,
-  type FakeOrderControl,
 } from "./test-fixtures.ts";
+
+const ENTRY_ID = "0b1e6c2a-1f3d-4c5b-8a9e-7d6c5b4a3f21";
+const STOP_ID = "9f8e7d6c-5b4a-4321-8fed-cba987654321";
+
+/** A filled live buy with a recorded stop, so the HALT path has a position to protect. */
+async function openLivePosition(db: Db, agent: Agent, id: string, stopLossPrice: number) {
+  await upsertOrder(db, {
+    id,
+    agentId: agent.id,
+    funderAddress: agent.tradingWallet,
+    side: "buy",
+    asset: "WETH",
+    orderType: "limit",
+    notionalUsd: 0.8,
+    status: "ORDER_STATUS_FILLED",
+    raw: { attachedBracket: { stopLossPrice } },
+    createdAt: T0,
+    updatedAt: T0,
+  });
+  await insertFills(db, [
+    { id: `${id}:fill`, orderId: id, price: 2000, qty: 0.0004, notionalUsd: 0.8, feeUsd: 0, integratorFeeUsd: 0, txId: "0xaa", ts: T0 },
+  ]);
+}
+
+type FlashCall = { op: "cancel" | "patch"; orderId: string; body: Record<string, unknown> };
+
+/** Flash REST stand-in: GET /orders/{id} returns the stored trigger, and cancel and PATCH are recorded. No network. */
+function fakeFlash(orders: Record<string, { trigger: { triggerType: "lower" | "upper"; crossPrice: string } }>) {
+  const calls: FlashCall[] = [];
+  const client = {
+    async getOrder(orderId: string) {
+      const order = orders[orderId];
+      if (!order) throw new Error(`unknown order ${orderId}`);
+      return { order: { id: orderId, status: "ORDER_STATUS_FILLED", ...order }, fills: [] };
+    },
+    async cancelOrder(orderId: string, body: Record<string, unknown>) {
+      calls.push({ op: "cancel", orderId, body });
+      return { ok: true };
+    },
+    async patchOrder(orderId: string, body: Record<string, unknown>) {
+      calls.push({ op: "patch", orderId, body });
+      return { ok: true };
+    },
+  };
+  return { client: client as unknown as FlashClient, calls };
+}
+
+/** EIP-191 stand-in: a fixed 65-byte signature, and a record of every message it was asked to sign. */
+function fakeMessageSigner(address: `0x${string}`) {
+  const signature = `0x${"ab".repeat(65)}` as const;
+  const signed: string[] = [];
+  const signer: MessageSigner = {
+    address,
+    async signMessage(message: string) {
+      signed.push(message);
+      return signature;
+    },
+  };
+  return { signer, signed, signature };
+}
 
 const dbs: Db[] = [];
 afterAll(async () => {
@@ -214,42 +274,48 @@ describe("live orders", () => {
     expect(episode?.error).toContain("not configured");
   });
 
-  test("with order control, a live cancel is sent to Flash and then recorded", async () => {
+  test("with order control, a live HALT cancels the pending entry and tightens the stop", async () => {
     const db = await freshDb();
     const agent = await seedAgent(db, { mode: "live" });
     await pendingEntry(db, agent, "buy-live", { quoteId: "q-1" });
-    const control: FakeOrderControl = fakeOrderControl();
+    await openLivePosition(db, agent, "buy-live-filled", 1900);
+    const control = fakeOrderControl();
     const summary = await runHaltActions(
-      deps({ db, market: fakeMarket({ WETH: 2000 }), orderControl: control }),
+      deps({ db, market: fakeMarket({ WETH: 2000 }), orderControlFor: async () => control }),
       [agent],
       { level: "HALT", asOf: 1 },
     );
     expect(summary.cancelled).toBe(1);
-    expect(control.cancels).toEqual([{ orderId: "buy-live", funderAddress: agent.tradingWallet }]);
+    expect(summary.stopsTightened).toBe(1);
+    expect(control.cancels).toEqual(["buy-live"]);
+    expect(control.stops).toEqual([{ orderId: "buy-live-filled", stopLossPrice: "1980" }]);
     expect(await orderStatus(db, "buy-live")).toBe("ORDER_STATUS_CANCELLED");
+  });
+
+  test("a rejected live cancel is recorded as an error and the order stays pending", async () => {
+    const db = await freshDb();
+    const agent = await seedAgent(db, { mode: "live" });
+    await pendingEntry(db, agent, "buy-live", { quoteId: "q-1" });
+    const control = fakeOrderControl();
+    control.failOn.add("buy-live");
+    const summary = await runHaltActions(
+      deps({ db, market: fakeMarket({ WETH: 2000 }), orderControlFor: async () => control }),
+      [agent],
+      { level: "HALT", asOf: 1 },
+    );
+    expect(summary.cancelled).toBe(0);
+    expect(summary.failures).toBe(1);
+    expect(await orderStatus(db, "buy-live")).toBe("ORDER_STATUS_PENDING");
   });
 
   test("a rejected live stop change is recorded as an error and the stored stop does not move", async () => {
     const db = await freshDb();
     const agent = await seedAgent(db, { mode: "live" });
-    await openPosition(db, agent, 1900, "buy-live-filled");
-    await upsertOrder(db, {
-      id: "buy-live-filled",
-      agentId: agent.id,
-      funderAddress: agent.tradingWallet,
-      side: "buy",
-      asset: "WETH",
-      orderType: "limit",
-      notionalUsd: 0.8,
-      status: "ORDER_STATUS_FILLED",
-      raw: { attachedBracket: { stopLossPrice: 1900 } },
-      createdAt: T0,
-      updatedAt: T0,
-    });
+    await openLivePosition(db, agent, "buy-live-filled", 1900);
     const control = fakeOrderControl();
     control.failOn.add("buy-live-filled");
     const summary = await runHaltActions(
-      deps({ db, market: fakeMarket({ WETH: 2000 }), orderControl: control }),
+      deps({ db, market: fakeMarket({ WETH: 2000 }), orderControlFor: async () => control }),
       [agent],
       { level: "HALT", asOf: 1 },
     );
@@ -259,35 +325,56 @@ describe("live orders", () => {
     expect((row?.raw as { attachedBracket: { stopLossPrice: number } }).attachedBracket.stopLossPrice).toBe(1900);
   });
 
-  test("a successful live stop change is sent to Flash with the raised level", async () => {
+  test("a successful live stop change is sent with the raised level as a plain decimal", async () => {
     const db = await freshDb();
     const agent = await seedAgent(db, { mode: "live" });
-    await upsertOrder(db, {
-      id: "buy-live-filled",
-      agentId: agent.id,
-      funderAddress: agent.tradingWallet,
-      side: "buy",
-      asset: "WETH",
-      orderType: "limit",
-      notionalUsd: 0.8,
-      status: "ORDER_STATUS_FILLED",
-      raw: { attachedBracket: { stopLossPrice: 1900 } },
-      createdAt: T0,
-      updatedAt: T0,
-    });
-    await insertFills(db, [
-      { id: "buy-live-filled:fill", orderId: "buy-live-filled", price: 2000, qty: 0.0004, notionalUsd: 0.8, feeUsd: 0, integratorFeeUsd: 0, txId: "0xaa", ts: T0 },
-    ]);
+    await openLivePosition(db, agent, "buy-live-filled", 1900);
     const control = fakeOrderControl();
     const summary = await runHaltActions(
-      deps({ db, market: fakeMarket({ WETH: 2000 }), orderControl: control }),
+      deps({ db, market: fakeMarket({ WETH: 2000 }), orderControlFor: async () => control }),
       [agent],
       { level: "HALT", asOf: 1 },
     );
     expect(summary.stopsTightened).toBe(1);
     expect(control.stops).toHaveLength(1);
     expect(control.stops[0]?.orderId).toBe("buy-live-filled");
-    expect(control.stops[0]?.stopLossPrice).toBeCloseTo(1980, 6);
+    expect(control.stops[0]?.stopLossPrice).toBe("1980");
+  });
+
+  test("the HALT live path signs every Flash message with the agent's message signer", async () => {
+    const db = await freshDb();
+    const agent = await seedAgent(db, { mode: "live" });
+    await pendingEntry(db, agent, ENTRY_ID, { quoteId: "q-1" });
+    await openLivePosition(db, agent, STOP_ID, 1900);
+    const flash = fakeFlash({ [STOP_ID]: { trigger: { triggerType: "lower", crossPrice: "1900" } } });
+    const signer = fakeMessageSigner(agent.tradingWallet);
+    const summary = await runHaltActions(
+      deps({ db, market: fakeMarket({ WETH: 2000 }), orderControlFor: async () => createOrderControl(flash.client, signer.signer) }),
+      [agent],
+      { level: "HALT", asOf: 1 },
+    );
+    expect(summary.failures).toBe(0);
+    expect(summary.cancelled).toBe(1);
+    expect(summary.stopsTightened).toBe(1);
+
+    const [cancel, patch] = flash.calls;
+    expect(flash.calls.map((c) => c.op)).toEqual(["cancel", "patch"]);
+    expect(cancel?.orderId).toBe(ENTRY_ID);
+    expect(cancel?.body).toEqual({ cancelMessage: `Definitive Flash v1 — Cancel Order\nOrder: ${ENTRY_ID}`, userSignature: signer.signature });
+    expect(patch?.orderId).toBe(STOP_ID);
+    expect(patch?.body.updateMessage).toContain("Trigger Lower Cross Price: 1980");
+    expect(patch?.body.trigger).toEqual({ triggerType: "lower", crossPrice: "1980" });
+    expect(patch?.body.userSignature).toBe(signer.signature);
+    // The signer saw exactly the two messages Flash received, in order, and nothing else.
+    expect(signer.signed).toEqual([String(cancel?.body.cancelMessage), String(patch?.body.updateMessage)]);
+  });
+});
+
+describe("formatPrice", () => {
+  test("writes plain decimals with no exponent and no trailing zeros", () => {
+    expect(formatPrice(1980)).toBe("1980");
+    expect(formatPrice(1980.5)).toBe("1980.5");
+    expect(formatPrice(0.00001234)).toBe("0.00001234");
   });
 });
 

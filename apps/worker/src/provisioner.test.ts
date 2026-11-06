@@ -4,13 +4,13 @@ import { configHash } from "@arena/policy";
 import { agentIdToBytes32, toUsd6, type Agent, type StrategyConfig } from "@arena/shared";
 import type { CreatedKey, CreateCappedKeyInput } from "@arena/zerog";
 import type { Hex } from "viem";
-import { english, generatePrivateKey, generateMnemonic, type LocalAccount } from "viem/accounts";
+import { english, generatePrivateKey, generateMnemonic } from "viem/accounts";
 import { loadWorkerEnv } from "./env.ts";
 import { getAgentZgKey, backoffMs, GAS_RETRY_MS, provisionAgent, provisionPass, provisioningRequirements, TEMPLATE_INDEX, type AllowanceWriter, type OnchainAgentRecord, type ProvisionDeps, type RegistryWriter, type ZgKeyMinter } from "./provisioner.ts";
 import { silentLogger } from "./logger.ts";
 import { decryptSecret, encryptSecret, parseEncryptionKey } from "./secrets.ts";
 import { fixedClock, memoryDb, seedAgent } from "./test-fixtures.ts";
-import { LocalWalletProvider, ZG_WALLET_ACCOUNT_INDEX, accountIndexFor, type WalletProvider } from "./wallets.ts";
+import { LocalWalletProvider, ZG_WALLET_ACCOUNT_INDEX, accountIndexFor, type TradingSender, type WalletProvider } from "./wallets.ts";
 
 const ZERO = "0x0000000000000000000000000000000000000000" as const;
 const TREASURY = "0x7777777777777777777777777777777777777777" as const;
@@ -76,8 +76,8 @@ class FakeAllowance implements AllowanceWriter {
   async allowance(owner: Hex, spender: Hex): Promise<bigint> {
     return this.allowances.get(`${owner.toLowerCase()}:${spender.toLowerCase()}`) ?? 0n;
   }
-  async approve(account: LocalAccount, spender: Hex, amountUsd6: bigint): Promise<Hex> {
-    const owner = account.address.toLowerCase();
+  async approve(from: TradingSender, spender: Hex, amountUsd6: bigint): Promise<Hex> {
+    const owner = from.address.toLowerCase();
     this.approvals.push({ owner, spender: spender.toLowerCase(), amount: amountUsd6 });
     this.allowances.set(`${owner}:${spender.toLowerCase()}`, amountUsd6);
     return txHash("a", this.approvals.length);
@@ -304,6 +304,9 @@ describe("provisioning: missing config skips steps", () => {
     const custodial: WalletProvider = {
       addressFor: async () => `0x${"ce".repeat(20)}`,
       signerFor: async () => {
+        throw new Error("not used");
+      },
+      messageSignerFor: async () => {
         throw new Error("not used");
       },
     };
