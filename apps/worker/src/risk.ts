@@ -1,9 +1,10 @@
-// Platform risk level (RiskOracle). Order: onchain getRisk() when RISK_ORACLE_ADDRESS is set, then the
-// latest risk_states row, then NORMAL. Cached for 30 s. The reading includes the report's asOf, which the
-// crash guard uses to act once per HALT report.
+// Platform risk level. Reads both the onchain RiskOracle (written by the CRE Crash Sentinel) and the latest
+// risk_states row (written by the web Demo menu or by this mirror), and uses whichever report is newer.
+// A newer onchain report is mirrored into risk_states so the web pill and Telegram show it. NORMAL when
+// neither exists. Cached for 30 s. The reading includes asOf, which the crash guard uses to act once per HALT.
 
-import { latestRisk, type Db } from "@arena/db";
-import { RISK_LEVELS, type RiskLevel } from "@arena/shared";
+import { insertRisk, latestRisk, type Db } from "@arena/db";
+import { RISK_LEVELS, type RiskLevel, type RiskReason } from "@arena/shared";
 import type { PublicClient } from "viem";
 import { RISK_ORACLE_ABI } from "./abi.ts";
 import type { Clock, RiskReading, RiskSource } from "./deps.ts";
@@ -16,7 +17,7 @@ export interface RiskSourceOptions {
   db: Db;
   clock: Clock;
   /** Reads RiskOracle.getRisk(). Omit when RISK_ORACLE_ADDRESS is not configured. */
-  readOnchain?: () => Promise<{ level: number; asOf: number | null }>;
+  readOnchain?: () => Promise<{ level: number; asOf: number | null; reasonCode?: number }>;
   logger?: Logger;
   cacheMs?: number;
 }
@@ -32,18 +33,33 @@ export function createRiskSource(opts: RiskSourceOptions): RiskSource {
   const read = async (): Promise<RiskReading> => {
     if (cached && opts.clock.now() - cached.at < cacheMs) return cached.reading;
 
-    let reading: RiskReading | null = null;
+    let onchain: (RiskReading & { reasonCode: number }) | null = null;
     if (opts.readOnchain) {
       try {
         const raw = await opts.readOnchain();
         const level: RiskLevel | undefined = RISK_LEVELS[raw.level];
-        if (level) reading = { level, asOf: raw.asOf === null ? null : toMs(raw.asOf) };
+        // asOf 0 means the oracle has never been written.
+        if (level && raw.asOf) onchain = { level, asOf: toMs(raw.asOf), reasonCode: raw.reasonCode ?? 0 };
       } catch (err) {
-        logger.warn("RiskOracle read failed, falling back to the database", { error: err });
+        logger.warn("RiskOracle read failed, using the database", { error: err });
       }
     }
-    if (!reading) {
-      const row = await latestRisk(opts.db);
+    const row = await latestRisk(opts.db);
+    let reading: RiskReading;
+    if (onchain && (!row || (onchain.asOf ?? 0) > row.asOf)) {
+      reading = { level: onchain.level, asOf: onchain.asOf };
+      try {
+        // Deterministic id, so repeated reads of the same report don't duplicate rows.
+        await insertRisk(opts.db, {
+          id: `onchain-${onchain.asOf}`,
+          level: onchain.level,
+          reasonCode: onchain.reasonCode as RiskReason,
+          asOf: onchain.asOf ?? 0,
+        });
+      } catch {
+        // Already mirrored.
+      }
+    } else {
       reading = row ? { level: row.level, asOf: row.asOf } : { level: "NORMAL", asOf: null };
     }
     cached = { at: opts.clock.now(), reading };
@@ -59,12 +75,16 @@ export function createRiskSource(opts: RiskSourceOptions): RiskSource {
 }
 
 /** Onchain reader for RiskOracle.getRisk(). Returns the uint8 level (0 NORMAL, 1 CAUTION, 2 HALT) and asOf. */
-export function riskOracleReader(client: PublicClient, address: `0x${string}`): () => Promise<{ level: number; asOf: number }> {
+export function riskOracleReader(
+  client: PublicClient,
+  address: `0x${string}`,
+): () => Promise<{ level: number; asOf: number; reasonCode: number }> {
   return async () => {
     const risk = (await client.readContract({ address, abi: RISK_ORACLE_ABI, functionName: "getRisk" })) as {
       level: number;
+      reasonCode: number;
       asOf: bigint;
     };
-    return { level: Number(risk.level), asOf: Number(risk.asOf) };
+    return { level: Number(risk.level), asOf: Number(risk.asOf), reasonCode: Number(risk.reasonCode) };
   };
 }

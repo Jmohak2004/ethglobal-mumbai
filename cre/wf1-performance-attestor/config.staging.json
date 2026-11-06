@@ -3,8 +3,8 @@
   "httpAuthorizedKeys": [],
   "chainSelectorName": "ethereum-testnet-sepolia-base-1",
   "isTestnet": true,
-  "agentRegistry": "0x0000000000000000000000000000000000000000",
-  "performanceRegistry": "0x0000000000000000000000000000000000000000",
+  "agentRegistry": "0x5396bcEec270cA05F9470c95eA1691e3cB037eB6",
+  "performanceRegistry": "0xa69123a34E6387127d31A8BAbFE1eC52BCCC72a9",
   "feeds": {
     "ETH_USD": "0x4aDC67696bA383F43DD60A9e78F2C97Fbbfc7cb1",
     "BTC_USD": "0x0FB99723Aee6f420beAD13e6bBB79b7E6F034298"
