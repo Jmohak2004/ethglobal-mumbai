@@ -19,3 +19,4 @@ cre/**/.env
 .telegram-state.json
 .relayer-cursor.json
 contracts/broadcast/**/dry-run/
+cre/**/.cre_build_tmp.js
