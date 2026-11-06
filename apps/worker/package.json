@@ -1,0 +1,16 @@
+{
+  "name": "@arena/worker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": { "dev": "bun --watch src/index.ts", "start": "bun src/index.ts", "typecheck": "tsc -p .", "test": "bun test" },
+  "dependencies": {
+    "@arena/db": "workspace:*",
+    "@arena/flash": "workspace:*",
+    "@arena/policy": "workspace:*",
+    "@arena/shared": "workspace:*",
+    "@arena/zerog": "workspace:*",
+    "viem": "^2.40.0",
+    "zod": "^4.1.0"
+  }
+}

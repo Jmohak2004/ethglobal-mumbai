@@ -1,0 +1,10 @@
+{
+  "name": "@arena/zerog",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": { "typecheck": "tsc -p .", "test": "bun test" },
+  "dependencies": { "@arena/shared": "workspace:*", "@0gfoundation/0g-storage-ts-sdk": "^1.2.13", "ethers": "^6.15.0", "viem": "^2.40.0", "zod": "^4.1.0" }
+}

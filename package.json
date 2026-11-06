@@ -1,0 +1,16 @@
+{
+  "name": "arena",
+  "private": true,
+  "workspaces": ["apps/*", "packages/*"],
+  "scripts": {
+    "typecheck": "bun run --filter '*' typecheck",
+    "test": "bun test packages",
+    "dev:web": "bun run --filter @arena/web dev",
+    "dev:worker": "bun run --filter @arena/worker dev",
+    "dev:bot": "bun run --filter @arena/telegram dev"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.9.0"
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "name": "@arena/db",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": { "typecheck": "tsc -p .", "test": "bun test", "seed": "bun src/seed.ts" },
+  "dependencies": { "@arena/shared": "workspace:*", "@electric-sql/pglite": "^0.5.15", "drizzle-orm": "^0.45.4", "postgres": "^3.4.7" },
+  "devDependencies": { "drizzle-kit": "^0.31.0" }
+}

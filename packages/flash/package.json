@@ -1,0 +1,10 @@
+{
+  "name": "@arena/flash",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": { "typecheck": "tsc -p .", "test": "bun test" },
+  "dependencies": { "@arena/shared": "workspace:*", "viem": "^2.40.0", "zod": "^4.1.0" }
+}

@@ -1,0 +1,10 @@
+{
+  "name": "@arena/shared",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": { "typecheck": "tsc -p ." },
+  "dependencies": { "viem": "^2.40.0", "zod": "^4.1.0" }
+}

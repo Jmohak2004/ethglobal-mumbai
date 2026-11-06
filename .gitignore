@@ -1,3 +1,13 @@
 .env
 .env.*
 !.env.example
+node_modules/
+.next/
+out/
+dist/
+*.tsbuildinfo
+.DS_Store
+.pglite/
+contracts/out/
+contracts/cache/
+contracts/broadcast/*/31337/
