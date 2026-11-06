@@ -1,6 +1,11 @@
+"use client";
+
+import { useQuery } from "@tanstack/react-query";
+
 import { Pill, type Tone } from "@/components/ui/pill";
 import { Tooltip } from "@/components/ui/tooltip";
-import type { RiskDisplay } from "@/lib/types";
+import { getJson } from "@/lib/api";
+import type { RiskDisplay, RiskStatus } from "@/lib/types";
 
 const LABEL: Record<RiskDisplay, { text: string; tone: Tone; meaning: string }> = {
   NORMAL: { text: "NORMAL", tone: "long", meaning: "Market calm. Agents trade normally." },
@@ -9,9 +14,19 @@ const LABEL: Record<RiskDisplay, { text: string; tone: Tone; meaning: string }> 
   UNKNOWN: { text: "UNKNOWN", tone: "muted", meaning: "Risk level could not be read right now. Treat it as unverified." },
 };
 
-/** Global crash-sentinel light. Server-renderable (no client JS). UNKNOWN is grey. */
+/**
+ * Global crash-sentinel light. Starts from the level the layout rendered, then polls /api/risk every 5 s so a level
+ * change (CRE report, or a demo control) shows within a few seconds. A failed poll shows UNKNOWN.
+ */
 export function RiskPill({ level }: { level: RiskDisplay }) {
-  const cfg = LABEL[level];
+  const q = useQuery({
+    queryKey: ["risk"],
+    queryFn: () => getJson<RiskStatus>("/api/risk"),
+    refetchInterval: 5_000,
+    retry: false,
+  });
+  const current: RiskDisplay = q.isError ? "UNKNOWN" : (q.data?.level ?? level);
+  const cfg = LABEL[current];
   return (
     <Tooltip
       side="bottom"

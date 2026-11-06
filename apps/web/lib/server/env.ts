@@ -23,6 +23,11 @@ export function sessionSecret(): string | null {
   return s && s.length >= 32 ? s : null;
 }
 
+/** DEMO_CONTROLS=true enables the nav Demo menu and POST /api/demo/risk. Off by default. Read on the server only. */
+export function demoControlsEnabled(): boolean {
+  return process.env.DEMO_CONTROLS === "true";
+}
+
 /** Shared 0G Router base URL for the active network. */
 export function zgRouterBaseUrl(): string | undefined {
   return env().ZG_ROUTER_URL || undefined;

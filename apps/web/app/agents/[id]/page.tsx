@@ -2,6 +2,7 @@ import type { PerformanceStats } from "@arena/shared";
 import { notFound } from "next/navigation";
 
 import { AgentHeader } from "@/components/agent/agent-header";
+import { AgentStatusStrip } from "@/components/agent/agent-status-strip";
 import { EquityChart } from "@/components/agent/equity-chart";
 import { OwnerSection } from "@/components/agent/owner-section";
 import { StatsGrid } from "@/components/agent/stats-grid";
@@ -77,6 +78,8 @@ export default async function AgentPage({
         forkedFromName={forkedFromName}
       />
 
+      <AgentStatusStrip agentId={agent.id} demo={sp.owner === "1"} />
+
       <StatsGrid stats={resolved} />
 
       <div className="grid gap-3 xl:grid-cols-[1fr_340px]">
@@ -90,7 +93,13 @@ export default async function AgentPage({
         </Panel>
       </div>
 
-      <OwnerSection agentId={agent.id} status={agent.status} demo={sp.owner === "1"} />
+      <OwnerSection
+        agentId={agent.id}
+        status={agent.status}
+        demo={sp.owner === "1"}
+        mode={agent.mode}
+        ownerShort={agent.ownerShort}
+      />
     </div>
   );
 }

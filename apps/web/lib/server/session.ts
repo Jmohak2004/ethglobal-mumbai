@@ -115,6 +115,15 @@ export function assertOwnerAccess(req: Request, ownerAddress: string, opts: { de
   return { demo: false };
 }
 
+/**
+ * Non-throwing form of assertOwnerAccess, for routes that serve a different projection to owners and everyone else
+ * (for example the runtime status: the public gets status, the owner gets the portfolio).
+ */
+export function isOwnerRequest(req: Request, ownerAddress: string, opts: { demo?: boolean } = {}): boolean {
+  if (opts.demo && !isProduction() && ownerAddress.toLowerCase() === DEMO_OWNER.toLowerCase()) return true;
+  return getSession(req)?.address === ownerAddress.toLowerCase();
+}
+
 export async function setSessionCookie(address: string): Promise<number> {
   const { token, expiresAt } = createSessionToken(address);
   (await cookies()).set(SESSION_COOKIE, token, {

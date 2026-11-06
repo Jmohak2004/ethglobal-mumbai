@@ -17,6 +17,12 @@ import type {
 } from "@arena/shared";
 import type { InferenceTrace } from "@arena/shared";
 import type { RiskReason } from "@arena/shared";
+import type {
+  AgentRuntimeState,
+  PaperLedgerEntry,
+  PaperLedgerTotals,
+  ProvisioningStatus,
+} from "@/lib/types";
 
 /** Opaque: the concrete type is @arena/db's Db (drizzle over postgres-js). */
 export type Db = unknown;
@@ -97,6 +103,18 @@ export interface Repo {
     trace: InferenceTrace,
     ctx?: { agentId?: string | null; userAddress?: string | null; purpose?: string; ts?: number },
   ): Promise<void>;
+  // Worker runtime status, run-now requests, paper ledger (@arena/db repo/demo.ts, repo/agents.ts)
+  getAgentRuntime(db: Db, agentId: string): Promise<AgentRuntimeState>;
+  requestTick(db: Db, agentId: string, requestedBy: string | null, now?: number): Promise<string>;
+  hasPendingTickRequest(db: Db, agentId: string): Promise<boolean>;
+  listPaperLedger(db: Db, agentId: string, limit?: number): Promise<PaperLedgerEntry[]>;
+  paperLedgerTotals(db: Db, agentId: string): Promise<PaperLedgerTotals>;
+  getProvisioning(db: Db, agentId: string): Promise<ProvisioningStatus | null>;
+  // Risk writes (repo/attestations.ts)
+  insertRisk(
+    db: Db,
+    input: { id?: string; level: RiskLevel; reasonCode: RiskReason; asOf: number; txHash?: string | null },
+  ): Promise<string>;
 }
 
 let repoPromise: Promise<Repo> | undefined;

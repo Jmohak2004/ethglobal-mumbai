@@ -4,9 +4,11 @@ import { clsx } from "clsx";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
+import { DemoMenu } from "@/components/layout/demo-menu";
 import { RiskPill } from "@/components/layout/risk-pill";
 import { SettingsPopover } from "@/components/layout/settings-popover";
 import { WalletButton } from "@/components/layout/wallet-button";
+import { CHAIN } from "@/lib/contracts";
 import type { RiskDisplay } from "@/lib/types";
 
 const LINKS = [
@@ -45,10 +47,14 @@ export function TopNav({ risk }: { risk: RiskDisplay }) {
       </nav>
 
       <div className="ml-auto flex items-center gap-3">
+        <DemoMenu />
         <RiskPill level={risk} />
-        <span className="num flex h-6 items-center gap-1.5 rounded-md border border-border px-2 text-[11px] text-muted">
+        <span
+          title={`Chain from NEXT_PUBLIC_CHAIN: ${CHAIN.name} (chain id ${CHAIN.id})`}
+          className="num flex h-6 items-center gap-1.5 rounded-md border border-border px-2 text-[11px] text-muted"
+        >
           <span className="size-1.5 rounded-full bg-link" />
-          Base
+          {CHAIN.name}
         </span>
         <SettingsPopover />
         <WalletButton />

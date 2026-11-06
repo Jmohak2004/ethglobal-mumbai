@@ -121,6 +121,88 @@ export interface EquityPoint {
   pnlUsd: number;
 }
 
+/** One open position in a paper (or live) book, marked to market. Mirrors @arena/db PortfolioPosition. */
+export interface PortfolioPosition {
+  asset: string;
+  qty: number;
+  avgPriceUsd: number;
+  markPriceUsd: number;
+  valueUsd: number;
+  unrealizedPnlUsd: number;
+}
+
+/** Mark-to-market snapshot written by the worker. Mirrors @arena/db PortfolioSnapshot. */
+export interface PortfolioSnapshot {
+  cashUsd: number;
+  positions: PortfolioPosition[];
+  equityUsd: number;
+  realizedPnlUsd: number;
+  unrealizedPnlUsd: number;
+  asOf: number;
+}
+
+/** Worker-written runtime status (agents.runtime). Mirrors @arena/db AgentRuntimeState. */
+export interface AgentRuntimeState {
+  lastTickAt?: number;
+  nextTickAt?: number;
+  lastOutcome?: string;
+  lastError?: string | null;
+  lastRequestId?: string | null;
+  portfolio?: PortfolioSnapshot;
+  updatedAt?: number;
+}
+
+/** Provisioning progress the status panel reads. Mirrors the walletAt fields of @arena/db ProvisioningState. */
+export interface ProvisioningStatus {
+  walletAt?: number | null;
+  zgWalletAt?: number | null;
+}
+
+/**
+ * GET /api/agents/[id]/runtime. Everyone gets the status fields. `portfolio`, `lastError`, `lastRequestId`,
+ * `tickQueued` and `tickIntervalSec` are present only when `viewer` is "owner" (the key is absent otherwise).
+ */
+export interface AgentRuntimeView {
+  viewer: "owner" | "public";
+  /** Server clock (unix ms) when the response was built. Used to correct countdowns for client clock skew. */
+  serverNow: number;
+  walletProvisioned: boolean;
+  lastTickAt: number | null;
+  nextTickAt: number | null;
+  lastOutcome: string | null;
+  updatedAt: number | null;
+  /** True when updatedAt is missing or older than 2 x the agent's tick interval. Computed on the server. */
+  workerOffline: boolean;
+  lastError?: string | null;
+  lastRequestId?: string | null;
+  portfolio?: PortfolioSnapshot | null;
+  tickQueued?: boolean;
+  tickIntervalSec?: number;
+}
+
+export interface PaperLedgerEntry {
+  id: string;
+  agentId: string;
+  kind: "commission" | "topup";
+  amountUsd: number;
+  amount0g: number | null;
+  note: string | null;
+  ts: number;
+}
+
+export interface PaperLedgerTotals {
+  commissionUsd: number;
+  topupUsd: number;
+  topup0g: number;
+  balanceUsd: number;
+}
+
+/** GET /api/agents/[id]/ledger (owner only). */
+export interface PaperLedgerView {
+  entries: PaperLedgerEntry[];
+  totals: PaperLedgerTotals;
+}
+
 export interface OpenOrder {
   id: string;
   ts: number;
@@ -193,6 +275,8 @@ export interface PlatformInfo {
   flashLive: boolean;
   /** Platform 0G key is configured (AI features work without a user key). */
   platformZgKey: boolean;
+  /** DEMO_CONTROLS=true on the server: the nav Demo menu may call POST /api/demo/risk (still session-checked). */
+  demoControls: boolean;
   dbEnabled: boolean;
   sessionEnabled: boolean;
   caps: {

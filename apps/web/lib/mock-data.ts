@@ -23,12 +23,15 @@ import type {
 } from "@arena/shared";
 import { DEMO_OWNER, TEMPLATES, defaultStrategy, type TemplateDef, type Timeframe } from "@/lib/templates";
 import type {
+  AgentRuntimeState,
   AgentTreasury,
   EquityPoint,
   Fill,
   HumansPrefs,
   LeaderboardQuery,
   OwnedAgent,
+  PaperLedgerEntry,
+  PaperLedgerView,
   RiskStatus,
   TopUp,
   TradingActivity,
@@ -618,6 +621,95 @@ export function equityCurveFor(id: string, allocationUsd: number, pnlPct: number
       pnlUsd: round(pnl, 2),
     };
   });
+}
+
+// ---------------------------------------------------------------------------
+// Runtime status, run-now and paper ledger (mock). Mirrors what the worker writes to agents.runtime.
+// ---------------------------------------------------------------------------
+
+/** Run-now requests in mock mode. A queued run "ticks" after MOCK_TICK_MS, so the button flow can be demoed. */
+const QUEUED_TICKS = new Map<string, number>();
+const MOCK_TICK_MS = 5_000;
+const MOCK_OUTCOMES = ["hold", "approve", "hold", "reject"] as const;
+
+export function getRuntimeSnapshot(agent: Agent, now = Date.now()): { runtime: AgentRuntimeState; walletProvisioned: boolean; tickQueued: boolean } {
+  const h = hashStr(`${agent.id}:runtime`);
+  const interval = Math.max(1, agent.config.tickIntervalSec);
+  const queuedAt = QUEUED_TICKS.get(agent.id);
+  let lastTickAt = now - (h % interval) * 1000;
+  if (queuedAt !== undefined && now - queuedAt >= MOCK_TICK_MS) {
+    QUEUED_TICKS.delete(agent.id);
+    lastTickAt = now;
+  }
+  const alloc = agent.config.limits.maxAllocationUsd;
+  const mark = 3000 + (h % 200);
+  const avg = 2950;
+  const qty = round((alloc * 0.4) / avg, 6);
+  const valueUsd = round(qty * mark, 2);
+  const cashUsd = round(alloc * 0.6, 2);
+  const unrealizedPnlUsd = round(qty * (mark - avg), 2);
+  const realizedPnlUsd = round(allTimePnlUsd(agent.id), 2);
+  return {
+    runtime: {
+      lastTickAt,
+      nextTickAt: lastTickAt + interval * 1000,
+      lastOutcome: MOCK_OUTCOMES[h % MOCK_OUTCOMES.length],
+      lastError: null,
+      lastRequestId: hashOf(`${agent.id}:request`),
+      updatedAt: now,
+      portfolio: {
+        cashUsd,
+        positions: qty > 0 ? [{ asset: "WETH", qty, avgPriceUsd: avg, markPriceUsd: mark, valueUsd, unrealizedPnlUsd }] : [],
+        equityUsd: round(cashUsd + valueUsd, 2),
+        realizedPnlUsd,
+        unrealizedPnlUsd,
+        asOf: now,
+      },
+    },
+    walletProvisioned: true,
+    tickQueued: QUEUED_TICKS.has(agent.id),
+  };
+}
+
+export function mockRequestTick(agentId: string, now = Date.now()): { requestId: string } {
+  QUEUED_TICKS.set(agentId, now);
+  return { requestId: hashOf(`${agentId}:tick:${now}`) };
+}
+
+export function getPaperLedger(agent: Agent, now = Date.now()): PaperLedgerView {
+  const owed = round(Math.max(0, allTimePnlUsd(agent.id)) * (agent.config.commissionBps / 10_000), 4);
+  const entries: PaperLedgerEntry[] = [];
+  if (owed > 0) {
+    const parts = [0.5, 0.3, 0.2];
+    parts.forEach((share, i) =>
+      entries.push({
+        id: `${agent.id}:commission:${i}`,
+        agentId: agent.id,
+        kind: "commission",
+        amountUsd: round(owed * share, 4),
+        amount0g: null,
+        note: "Paper performance fee on realized profit",
+        ts: now - (i + 1) * 6 * HOUR,
+      }),
+    );
+    const topupUsd = round(owed * 0.5, 4);
+    entries.push({
+      id: `${agent.id}:topup:0`,
+      agentId: agent.id,
+      kind: "topup",
+      amountUsd: topupUsd,
+      amount0g: round(topupUsd / ZG_PRICE_MOCK_USD, 4),
+      note: "Simulated top-up to 0G credit",
+      ts: now - 2 * 6 * HOUR,
+    });
+  }
+  const commissionUsd = round(entries.filter((e) => e.kind === "commission").reduce((s, e) => s + e.amountUsd, 0), 4);
+  const topupUsd = round(entries.filter((e) => e.kind === "topup").reduce((s, e) => s + e.amountUsd, 0), 4);
+  const topup0g = round(entries.filter((e) => e.kind === "topup").reduce((s, e) => s + (e.amount0g ?? 0), 0), 4);
+  return {
+    entries: entries.sort((a, b) => b.ts - a.ts),
+    totals: { commissionUsd, topupUsd, topup0g, balanceUsd: round(commissionUsd - topupUsd, 4) },
+  };
 }
 
 export async function getRisk(): Promise<RiskStatus> {

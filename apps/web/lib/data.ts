@@ -3,9 +3,19 @@
 // the same functions serve the deterministic mock data in lib/mock-data.ts (logged once at startup).
 // Server-only: never import from a client component (use lib/types.ts for types).
 import { RiskReason, agentIdToBytes32 } from "@arena/shared";
-import type { Agent, AgentStatus, Episode, ExecutionMode, Lesson, PerformanceStats, StrategyConfig } from "@arena/shared";
+import type {
+  Agent,
+  AgentStatus,
+  Episode,
+  ExecutionMode,
+  Lesson,
+  PerformanceStats,
+  RiskLevel,
+  StrategyConfig,
+} from "@arena/shared";
 import { env } from "@/lib/server/env";
 import { dbContext, type Db, type Repo } from "@/lib/server/db";
+import { agentTrades, equitySeries } from "@/lib/server/equity";
 import { readTreasuryAccount } from "@/lib/server/chain";
 import { ApiError } from "@/lib/server/errors";
 import { shortAddr } from "@/lib/format";
@@ -13,11 +23,13 @@ import { round4, tierFor } from "@/lib/treasury-math";
 import * as mock from "@/lib/mock-data";
 import { TEMPLATES, type TemplateDef } from "@/lib/templates";
 import type {
+  AgentRuntimeState,
   AgentTreasury,
   EquityPoint,
   HumansPrefs,
   LeaderboardQuery,
   OwnedAgent,
+  PaperLedgerView,
   PublicAgent,
   RiskStatus,
   TopUp,
@@ -150,15 +162,88 @@ export async function getAgentTreasury(id: string): Promise<AgentTreasury | null
   return treasuryFromDb(ctx, agent, stats?.realizedPnlUsd ?? 0);
 }
 
-/** Aggregate equity for the agent page chart. Ends at the all-time realized PnL. */
+/**
+ * Aggregate equity for the agent page chart. DB path: built from the agent's fills (starting cash, realized PnL per
+ * fill, then the worker's latest equity). Empty when the agent has no fills yet. Mock path: seeded curve.
+ */
 export async function getAgentEquityCurve(id: string): Promise<EquityPoint[]> {
   const ctx = await dbContext();
   if (!ctx) return mock.getAgentEquityCurve(id);
   const agent = await ctx.r.getAgent(ctx.db, id);
   if (!agent) return [];
-  const stats = (await statsById(ctx)).get(id);
-  // Per-tick equity is not persisted yet, so the curve is synthesized from the all-time stats.
-  return mock.equityCurveFor(id, agent.config.limits.maxAllocationUsd, stats?.realizedPnlPct ?? 0);
+  const trades = await agentTrades(ctx.db, id);
+  if (trades.length === 0) return [];
+  const runtime = await ctx.r.getAgentRuntime(ctx.db, id);
+  return equitySeries({
+    startUsd: agent.config.limits.maxAllocationUsd,
+    startedAt: agent.createdAt,
+    trades,
+    latest: runtime.portfolio ?? null,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Runtime status, run-now, paper ledger, demo risk
+// ---------------------------------------------------------------------------
+
+export interface RuntimeSnapshot {
+  runtime: AgentRuntimeState;
+  walletProvisioned: boolean;
+  /** A "run now" request is waiting for the worker to claim it. */
+  tickQueued: boolean;
+}
+
+/** Worker-written status for one agent. Route handlers project it with toRuntimeView (lib/runtime.ts). */
+export async function getAgentRuntimeSnapshot(agent: Agent): Promise<RuntimeSnapshot> {
+  const ctx = await dbContext();
+  if (!ctx) return mock.getRuntimeSnapshot(agent);
+  const { db, r } = ctx;
+  const [runtime, provisioning, tickQueued] = await Promise.all([
+    r.getAgentRuntime(db, agent.id),
+    r.getProvisioning(db, agent.id),
+    r.hasPendingTickRequest(db, agent.id),
+  ]);
+  return { runtime, walletProvisioned: Boolean(provisioning?.walletAt), tickQueued };
+}
+
+/**
+ * Queues a "run now" tick for the worker to claim (within about 3 s). Throws 409 when one is already queued.
+ * The caller checks ownership and that the agent is active.
+ */
+export async function requestAgentTick(agent: Agent, requestedBy: string | null): Promise<{ requestId: string }> {
+  const ctx = await dbContext();
+  if (!ctx) return mock.mockRequestTick(agent.id);
+  const { db, r } = ctx;
+  if (await r.hasPendingTickRequest(db, agent.id)) {
+    throw new ApiError(409, "CONFLICT", "A run is already queued for this agent");
+  }
+  return { requestId: await r.requestTick(db, agent.id, requestedBy) };
+}
+
+/** Paper self-funding ledger: commission earned, top-ups and totals. Owner only (the route enforces it). */
+export async function getPaperLedger(agent: Agent): Promise<PaperLedgerView> {
+  const ctx = await dbContext();
+  if (!ctx) return mock.getPaperLedger(agent);
+  const { db, r } = ctx;
+  const [entries, totals] = await Promise.all([r.listPaperLedger(db, agent.id, 50), r.paperLedgerTotals(db, agent.id)]);
+  return { entries, totals };
+}
+
+/**
+ * Demo only (DEMO_CONTROLS): records a platform risk level so the nav pill and the worker see it. CAUTION and HALT
+ * use reason 5 (manual simulation), NORMAL uses reason 0. Needs the database; mock mode has no risk writes.
+ */
+export async function setDemoRisk(level: RiskLevel): Promise<RiskStatus> {
+  const ctx = await dbContext();
+  if (!ctx) throw new ApiError(503, "UNAVAILABLE", "Demo risk needs DATABASE_URL (the risk level is stored in the database)");
+  const asOf = Date.now();
+  await ctx.r.insertRisk(ctx.db, {
+    id: `demo-${level.toLowerCase()}-${asOf}`,
+    level,
+    reasonCode: level === "NORMAL" ? RiskReason.None : RiskReason.ManualSimulation,
+    asOf,
+  });
+  return getRisk();
 }
 
 export async function getRisk(): Promise<RiskStatus> {

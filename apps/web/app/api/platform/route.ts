@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { dbConfigured } from "@/lib/server/db";
-import { env, flashLive, sessionSecret } from "@/lib/server/env";
+import { demoControlsEnabled, env, flashLive, sessionSecret } from "@/lib/server/env";
 import { route } from "@/lib/server/errors";
 import type { PlatformInfo } from "@/lib/types";
 
@@ -15,6 +15,7 @@ export const GET = route(async () => {
     network: e.NETWORK,
     flashLive: flashLive(),
     platformZgKey: Boolean(e.ZG_API_KEY),
+    demoControls: demoControlsEnabled(),
     dbEnabled: dbConfigured(),
     sessionEnabled: Boolean(sessionSecret()),
     caps: {

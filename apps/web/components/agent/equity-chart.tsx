@@ -39,7 +39,11 @@ export function EquityChart({ points }: { points: EquityPoint[] }) {
   }, [points]);
 
   if (points.length === 0) {
-    return <div className="flex h-64 items-center justify-center text-[12px] text-muted">No history yet.</div>;
+    return (
+      <div className="flex h-64 items-center justify-center px-6 text-center text-[12px] text-muted">
+        No trades yet — waiting for the agent&apos;s first decision
+      </div>
+    );
   }
   return <div ref={ref} className="h-64 w-full" />;
 }
