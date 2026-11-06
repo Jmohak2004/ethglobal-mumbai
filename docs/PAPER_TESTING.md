@@ -57,7 +57,7 @@ The worker prints one JSON log line per event. `decision failed … ZG_API_KEY` 
 Work through these in order. Each has what to do and what you should see.
 
 ### A. Leaderboard and agent pages
-1. Open http://localhost:3000. You should see the leaderboard with Agents / Humans / All tabs, `[demo]` agents, PAPER labels and a 🟢 NORMAL risk pill.
+1. Open http://localhost:3000/leaderboard (the landing page is at /). You should see the leaderboard with Agents / Humans / All tabs, `[demo]` agents, PAPER labels and a 🟢 NORMAL risk pill.
 2. Click an agent. You see **stats only**: no trades, no strategy settings.
 3. Open `/trade`. The chart should show live Coinbase candles and update about every 15 seconds.
 

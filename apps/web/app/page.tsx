@@ -1,47 +1,56 @@
-import { Suspense } from "react";
+import type { PerformanceStats } from "@arena/shared";
+import { connection } from "next/server";
 
-import { LeaderboardControls } from "@/components/leaderboard/leaderboard-controls";
-import { LeaderboardTable } from "@/components/leaderboard/leaderboard-table";
-import { StatStrip } from "@/components/leaderboard/stat-strip";
-import { getLeaderboard, getRisk, parseLeaderboardQuery } from "@/lib/data";
-import { dbConfigured } from "@/lib/server/db";
+import { ClosingCta } from "@/components/landing/closing-cta";
+import { Faq } from "@/components/landing/faq";
+import { GetStarted } from "@/components/landing/get-started";
+import { PoweredBy, WhatYouCanDo } from "@/components/landing/features";
+import { Hero, type LiveStats } from "@/components/landing/hero";
+import { HowItWorks } from "@/components/landing/how-it-works";
+import { Safety } from "@/components/landing/safety";
+import { getLeaderboard, getRisk } from "@/lib/data";
+import { softRead } from "@/lib/server/soft";
+import type { RiskDisplay } from "@/lib/types";
 
-export const metadata = { title: "Leaderboard" };
+export const metadata = { title: "AI trading agents you can verify" };
 
-export default async function LeaderboardPage({
-  searchParams,
-}: {
-  searchParams: Promise<Record<string, string | string[] | undefined>>;
-}) {
-  const query = parseLeaderboardQuery(await searchParams);
-  const [rows, everyone, last24h, risk] = await Promise.all([
-    getLeaderboard(query),
-    getLeaderboard({ kind: "agent", timeframe: "all" }),
-    getLeaderboard({ kind: "all", timeframe: "24h" }),
-    getRisk(),
-  ]);
+// Agent counts and the crash light come from the database. A failed read falls back to "n/a" and UNKNOWN, never a 500.
+async function loadLiveStats(): Promise<LiveStats | null> {
+  return softRead<LiveStats | null>(
+    "landing live stats",
+    async () => {
+      const rows: PerformanceStats[] = await getLeaderboard({ kind: "agent", timeframe: "all" });
+      const verified = rows.filter((r) => r.verified).length;
+      return {
+        agents: rows.length,
+        live: rows.filter((r) => r.mode === "live").length,
+        paper: rows.filter((r) => r.mode === "paper").length,
+        verifiedPct: rows.length ? (verified / rows.length) * 100 : 0,
+      };
+    },
+    null,
+  );
+}
 
-  const verifiedCount = everyone.filter((a) => a.verified).length;
-  const stats = {
-    agents: everyone.length,
-    live: everyone.filter((a) => a.mode === "live").length,
-    paper: everyone.filter((a) => a.mode === "paper").length,
-    volume24h: last24h.reduce((sum, r) => sum + r.volumeUsd, 0),
-    verifiedPct: everyone.length ? (verifiedCount / everyone.length) * 100 : 0,
-    risk: risk.level,
-  };
+async function loadRisk(): Promise<RiskDisplay> {
+  return softRead<RiskDisplay>("landing risk", async () => (await getRisk()).level, "UNKNOWN");
+}
+
+export default async function LandingPage() {
+  // Read live numbers per request, not from a build-time snapshot.
+  await connection();
+  const [live, risk] = await Promise.all([loadLiveStats(), loadRisk()]);
 
   return (
-    <div className="flex flex-col gap-3 px-4 py-3">
-      <StatStrip {...stats} />
-      <Suspense fallback={null}>
-        <LeaderboardControls windowedStats={!dbConfigured()} />
-      </Suspense>
-      <LeaderboardTable rows={rows} />
-      <p className="text-[11px] text-muted">
-        Stats only. Trades, configs and sliders are visible to owners and forkers. Stats are computed by Chainlink CRE from
-        Flash fills and signed onchain.
-      </p>
-    </div>
+    <>
+      <Hero live={live} risk={risk} />
+      <HowItWorks />
+      <GetStarted />
+      <WhatYouCanDo />
+      <Safety />
+      <PoweredBy />
+      <Faq />
+      <ClosingCta />
+    </>
   );
 }

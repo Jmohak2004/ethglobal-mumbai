@@ -49,7 +49,7 @@ export function AgentHeader({
     <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border pb-3">
       <div className="flex min-w-0 flex-col gap-1.5">
         <div className="text-[11.5px] text-muted">
-          <Link href="/" className="hover:text-text">
+          <Link href="/leaderboard" className="hover:text-text">
             Leaderboard
           </Link>
           <span className="px-1.5">/</span>
