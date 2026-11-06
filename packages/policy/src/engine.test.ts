@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { GlobalLimits, PolicyContext, Proposal, StrategyConfig, TemplateId } from "@arena/shared";
+import type { Forecast, GlobalLimits, PolicyContext, Proposal, StrategyConfig, TemplateId } from "@arena/shared";
 import { defaultConfig } from "./config.ts";
 import { evaluate } from "./engine.ts";
 
@@ -359,5 +359,101 @@ describe("evaluate: account limits", () => {
 
   test("invalid mark price rejects", () => {
     expect(evaluate(buy(), makeCtx("momentum", { markPrice: 0 })).kind).toBe("reject");
+  });
+});
+
+const forecast = (confidence: number): Forecast => ({
+  asset: "WETH",
+  horizonMin: 60,
+  direction: "up",
+  expectedMovePct: 1,
+  confidence,
+});
+
+describe("evaluate: minConfidence gate", () => {
+  test("buy is rejected when forecast confidence is below the template slider", () => {
+    // Momentum default minConfidence is 60%. A 0.5 forecast is 50%.
+    const v = evaluate(buy(), makeCtx("momentum", { forecast: forecast(0.5) }));
+    expect(v.kind).toBe("reject");
+    if (v.kind === "reject") expect(v.reasons.join(" ")).toMatch(/forecast confidence 50\.00% below minimum 60%/);
+  });
+
+  test("forecast confidence equal to the slider is not rejected", () => {
+    // 0.57 * 100 is not exactly 57 in floating point, so this checks the comparison is done in fraction units.
+    const v = evaluate(buy(), makeCtx("momentum", { forecast: forecast(0.57) }, (c) => ({ ...c, sliders: { ...c.sliders, minConfidence: 57 } })));
+    expect(v.kind).not.toBe("reject");
+  });
+
+  test("slider value is read from the config, not only the template default", () => {
+    const strict = (c: StrategyConfig): StrategyConfig => ({ ...c, sliders: { ...c.sliders, minConfidence: 80 } });
+    expect(evaluate(buy(), makeCtx("momentum", { forecast: forecast(0.7) }, strict)).kind).toBe("reject");
+    expect(evaluate(buy(), makeCtx("momentum", { forecast: forecast(0.7) })).kind).not.toBe("reject");
+  });
+
+  test("missing forecast does not trigger the rule", () => {
+    expect(evaluate(buy(), makeCtx("momentum", { forecast: undefined })).kind).not.toBe("reject");
+    expect(evaluate(buy(), makeCtx("momentum", { forecast: null })).kind).not.toBe("reject");
+  });
+
+  test("templates without a minConfidence slider skip the rule", () => {
+    // smart_dca has no minConfidence slider, so a 10% forecast does not block a buy.
+    const v = evaluate(
+      buy({ orderType: "twap", twapDurationSec: 3600, twapBuckets: 4, takeProfitPct: 4, stopLossPct: undefined }),
+      makeCtx("smart_dca", { forecast: forecast(0.1) }),
+    );
+    expect(v.kind).not.toBe("reject");
+    if (v.kind === "reject") expect(v.reasons.join(" ")).not.toMatch(/confidence/);
+  });
+
+  test("the rule only applies to buys", () => {
+    expect(evaluate(sell(), makeCtx("momentum", { forecast: forecast(0.1) })).kind).not.toBe("reject");
+  });
+});
+
+describe("evaluate: sell sizing from positionUsd", () => {
+  // Raise the platform trade cap so the position-based notional is not clamped by it.
+  const BIG_GLOBAL: GlobalLimits = { ...GLOBAL, maxTradeUsd: 10 };
+
+  test("sell without a size closes the whole position", () => {
+    const v = evaluate(sell({ sizePct: undefined }), makeCtx("momentum", { positionUsd: 4 }, undefined, BIG_GLOBAL));
+    expect(v.kind).toBe("clamp");
+    if (v.kind !== "clamp") return;
+    expect(v.order.notionalUsd).toBeCloseTo(4, 9);
+    expect(v.reasons.join(" ")).toMatch(/full position/);
+  });
+
+  test("sell size is a fraction of the position, not the allocation", () => {
+    // 50% of a $4 position is $2. 50% of the $5 allocation would be $2.50.
+    const v = evaluate(sell({ sizePct: 0.5 }), makeCtx("momentum", { positionUsd: 4 }, undefined, BIG_GLOBAL));
+    expect(v.kind).toBe("approve");
+    if (v.kind === "approve") expect(v.order.notionalUsd).toBeCloseTo(2, 9);
+  });
+
+  test("sell size above 100% is capped at the position", () => {
+    const v = evaluate(sell({ sizePct: 2 }), makeCtx("momentum", { positionUsd: 4 }, undefined, BIG_GLOBAL));
+    expect(v.kind).toBe("clamp");
+    if (v.kind !== "clamp") return;
+    expect(v.order.notionalUsd).toBeCloseTo(4, 9);
+    expect(v.reasons.join(" ")).toMatch(/capped to 100% of position/);
+  });
+
+  test("sell with positionUsd 0 is rejected", () => {
+    const v = evaluate(sell({ sizePct: 0.5 }), makeCtx("momentum", { positionUsd: 0 }, undefined, BIG_GLOBAL));
+    expect(v.kind).toBe("reject");
+    if (v.kind === "reject") expect(v.reasons.join(" ")).toMatch(/no position to sell/);
+  });
+
+  test("sell with positionUsd undefined keeps the allocation-based size", () => {
+    // 50% of the $5 allocation is $2.50.
+    const v = evaluate(sell({ sizePct: 0.5 }), makeCtx("momentum", {}, undefined, BIG_GLOBAL));
+    expect(v.kind).toBe("approve");
+    if (v.kind === "approve") expect(v.order.notionalUsd).toBeCloseTo(2.5, 9);
+  });
+
+  test("positionUsd does not change buy sizing or reject buys", () => {
+    // A zero position is not a reason to block a buy: 15% of $5 is $0.75.
+    const v = evaluate(buy(), makeCtx("momentum", { positionUsd: 0 }));
+    expect(v.kind).toBe("approve");
+    if (v.kind === "approve") expect(v.order.notionalUsd).toBeCloseTo(0.75, 9);
   });
 });

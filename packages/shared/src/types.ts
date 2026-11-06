@@ -116,6 +116,17 @@ export interface Forecast {
   confidence: number; // 0..1
 }
 
+/** A forecast persisted for later scoring against the Chainlink feed price. */
+export interface StoredForecast extends Forecast {
+  id: string;
+  agentId: string;
+  ts: number;
+  priceAtForecast: number;
+  resolveAt: number;
+  resolvedPrice: number | null;
+  hit: boolean | null;
+}
+
 export type ProposalAction = "buy" | "sell" | "hold" | "adjust_stops" | "cancel";
 
 /** What the LLM proposes. Never executed directly: always goes through the policy engine. */
@@ -183,6 +194,10 @@ export interface PolicyContext {
   markPrice: number;
   allocationUsd: number;
   global: GlobalLimits;
+  /** Forecast from the same decision, used to enforce the template's minConfidence slider. */
+  forecast?: Forecast | null;
+  /** Current position value in the proposal's asset, used to size sells. */
+  positionUsd?: number;
 }
 
 export interface InferenceTrace {

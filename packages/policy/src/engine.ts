@@ -233,18 +233,23 @@ export function evaluate(proposal: Proposal, ctx: PolicyContext, opts: EvaluateO
     rejects.push("RiskOracle CAUTION: breakout (stop) entries blocked");
   }
 
-  // Sizing: notional = sizePct x effective allocation.
+  // Sizing: buys use sizePct x effective allocation. Sells use sizePct x current position when it is known.
   const allocation = Math.min(ctx.allocationUsd, config.limits.maxAllocationUsd, global.maxAgentAllocationUsd);
   if (allocation < ctx.allocationUsd) {
     clamps.push(`allocation $${fmt(ctx.allocationUsd)} capped to $${fmt(allocation)}`);
   }
 
-  // Templates without a sizePct slider (smart_dca) are capped at the full allocation; budgetUsd caps below.
+  const position = isBuy ? undefined : ctx.positionUsd;
+  if (position !== undefined && !(position > 0)) rejects.push("no position to sell");
+  const sizeBase = position ?? allocation;
+  const sizeLabel = position !== undefined ? "position" : "allocation";
+
+  // Templates without a sizePct slider (smart_dca) are capped at the full base; budgetUsd caps below.
   const templateSizePct = sliderValue(config, def, "sizePct") ?? PROTECTION_BOUNDS.sizePct.max;
   let sizeFrac: number;
   if (proposal.sizePct === undefined) {
     sizeFrac = isBuy ? templateSizePct / 100 : 1;
-    clamps.push(isBuy ? `no size given; using template size ${templateSizePct}%` : "no size given; sell defaults to full allocation");
+    clamps.push(isBuy ? `no size given; using template size ${templateSizePct}%` : `no size given; sell defaults to full ${sizeLabel}`);
   } else {
     sizeFrac = proposal.sizePct;
   }
@@ -255,11 +260,12 @@ export function evaluate(proposal: Proposal, ctx: PolicyContext, opts: EvaluateO
     clamps.push(`size ${Math.round(sizeFrac * 100)}% capped to template maximum ${templateSizePct}%`);
     sizeFrac = templateSizePct / 100;
   } else if (sizeFrac > 1) {
-    clamps.push("size capped to 100% of allocation");
+    clamps.push(`size capped to 100% of ${sizeLabel}`);
     sizeFrac = 1;
   }
 
-  let notional = sizeFrac * allocation;
+  // sizeFrac is at most 1 here, so a sell never exceeds positionUsd.
+  let notional = sizeFrac * sizeBase;
   if (isBuy && ctx.riskLevel === "CAUTION") {
     notional /= 2;
     clamps.push("RiskOracle CAUTION: notional halved");
@@ -353,6 +359,13 @@ export function evaluate(proposal: Proposal, ctx: PolicyContext, opts: EvaluateO
 
     if (ctx.drawdownPct >= config.limits.maxDrawdownPct) {
       rejects.push(`drawdown ${fmt(ctx.drawdownPct)}% at or above limit ${config.limits.maxDrawdownPct}%: agent paused`);
+    }
+
+    // The slider is in percent (0..100) and forecast.confidence is a fraction (0..1). Divide the slider to compare.
+    // Missing forecast: this rule does not apply.
+    const minConfidence = sliderValue(config, def, "minConfidence");
+    if (ctx.forecast && minConfidence !== undefined && ctx.forecast.confidence < minConfidence / 100) {
+      rejects.push(`forecast confidence ${fmt(ctx.forecast.confidence * 100)}% below minimum ${minConfidence}%`);
     }
   }
 
