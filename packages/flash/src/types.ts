@@ -425,7 +425,8 @@ export const UpdateOrderTriggerSchema = z.looseObject({
   triggerType: TriggerTypeSchema,
 });
 
-export const UpdateBracketLegSchema = UpdateOrderTriggerSchema.extend({ limitPrice: z.string() });
+/** Bracket leg: a new trigger in the basis the leg was placed with. limitPrice is optional (omitted = sells at market). */
+export const UpdateBracketLegSchema = UpdateOrderTriggerSchema.extend({ limitPrice: z.string().optional() });
 
 export const UpdateOrderRequestSchema = z.looseObject({
   updateMessage: z.string().min(1),
@@ -447,8 +448,15 @@ export type CancelOrderRequest = z.input<typeof CancelOrderRequestSchema>;
 
 export const CancelOrderResponseSchema = z.looseObject({ ok: z.literal(true) });
 
+/** Lowercase hyphenated UUID, exactly as the OpenAPI spec pattern states. */
+export const ORDER_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
 export const BatchCancelOrderRequestSchema = z.looseObject({
-  orderIds: z.array(z.string().uuid()).min(1).max(25),
+  orderIds: z
+    .array(z.string().regex(ORDER_ID_PATTERN))
+    .min(1)
+    .max(25)
+    .refine((ids) => new Set(ids).size === ids.length, "duplicate order ids are rejected"),
   cancelMessage: z.string().min(1),
   userSignature: z.string().min(1),
 });

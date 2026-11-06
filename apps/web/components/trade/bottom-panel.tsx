@@ -1,18 +1,22 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { useAccount } from "wagmi";
+import { useAccount, useSignMessage } from "wagmi";
 
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Tabs, type TabItem } from "@/components/ui/tabs";
 import { EmptyRow, TD, TH, THead, TR, Table } from "@/components/ui/table";
-import { getJson } from "@/lib/api";
-import { DEFINITIVE_APP_URL, fmtAmount, fmtDateTime, fmtUsd, pnlClass, shortHash, txUrl } from "@/lib/format";
+import { useToast } from "@/components/ui/toast";
+import { describeError, getJson } from "@/lib/api";
+import { fmtAmount, fmtDateTime, fmtUsd, pnlClass, shortHash, txUrl } from "@/lib/format";
 import { usePlatform } from "@/lib/hooks/use-platform";
 import { useSession } from "@/lib/hooks/use-session";
+import { markPaperOrdersCancelled, usePaperCancelledOrders } from "@/lib/paper-orders";
 import { usePaperFills } from "@/lib/paper-fills";
-import type { Balance, Fill, OpenOrder, TradingActivity } from "@/lib/types";
+import { cancelFlashOrders } from "@/lib/trade";
+import type { Balance, CancelResult, Fill, OpenOrder, TradingActivity } from "@/lib/types";
 
 type BottomTab = "orders" | "fills" | "balances";
 
@@ -34,6 +38,11 @@ export function BottomPanel({ activity }: { activity: TradingActivity }) {
   const session = useSession({ prompt: false });
   const platform = usePlatform();
   const paper = usePaperFills();
+  const qc = useQueryClient();
+  const toast = useToast();
+  const { signMessageAsync } = useSignMessage();
+  const cancelledPaper = usePaperCancelledOrders();
+  const [busy, setBusy] = useState<string | null>(null);
 
   const funder = session.signedIn ? session.address : null;
   const live = useQuery({
@@ -63,6 +72,47 @@ export function BottomPanel({ activity }: { activity: TradingActivity }) {
     note = activity.source === "demo" ? "Demo data. Connect a wallet to see your Flash activity." : null;
   }
 
+  // Live Flash rows are signed by the funder wallet. Demo and paper rows are only marked cancelled locally.
+  const liveOrders = funder !== null && live.data?.live === true;
+  const cancellable = openOrders.filter((o) => !cancelledPaper.has(o.id)).map((o) => o.id);
+
+  async function cancelRows(ids: string[], label: string): Promise<void> {
+    if (ids.length === 0 || busy !== null) return;
+    const markLocal = () => {
+      markPaperOrdersCancelled(ids);
+      toast({
+        title: "Cancelled (simulated)",
+        description: `${ids.length} paper order${ids.length === 1 ? "" : "s"} marked cancelled. Nothing was sent to Flash.`,
+      });
+    };
+    if (!liveOrders) {
+      markLocal();
+      return;
+    }
+    setBusy(label);
+    try {
+      const results = await cancelFlashOrders(ids, (message) => signMessageAsync({ message }));
+      if (results === null) {
+        markLocal();
+        return;
+      }
+      // PENDING_CANCEL means a cancel is already in flight, so it counts as cancelled. The refetch below confirms it.
+      const settled = (r: CancelResult) => r.ok || r.errorCode === "PENDING_CANCEL";
+      const failed = results.filter((r) => !settled(r));
+      const done = results.length - failed.length;
+      toast({
+        title: failed.length === 0 ? `Cancelled ${done} order${done === 1 ? "" : "s"}` : `Cancelled ${done} of ${results.length}`,
+        description: failed.map((r) => `${r.orderId.slice(0, 8)}: ${r.errorCode ?? "not cancelled"}`).join("; ") || undefined,
+        tone: failed.length === 0 ? "success" : "error",
+      });
+    } catch (err) {
+      toast({ title: "Cancel not completed", description: describeError(err), tone: "error" });
+    } finally {
+      setBusy(null);
+      await qc.invalidateQueries({ queryKey: ["flash-activity", funder] });
+    }
+  }
+
   return (
     <section className="flex min-w-0 flex-col rounded-md border border-border bg-panel" aria-label="Account activity">
       <div className="flex items-center justify-between px-3">
@@ -70,6 +120,16 @@ export function BottomPanel({ activity }: { activity: TradingActivity }) {
         {note ? <span className="max-w-md truncate text-[11px] text-muted" title={note}>{note}</span> : null}
       </div>
       <div className="overflow-x-auto border-t border-border">
+        {tab === "orders" ? (
+          <div className="flex items-center justify-end gap-3 px-3 py-1.5">
+            {busy ? <span className="mr-auto text-[11px] text-muted">{busy}...</span> : null}
+            {liveOrders ? null : <span className="mr-auto text-[11px] text-muted">Paper orders: cancels are simulated.</span>}
+            <Button size="sm" disabled={busy !== null || cancellable.length === 0} onClick={() => cancelRows(cancellable, "Cancelling all")}>
+              {liveOrders ? "Cancel all" : "Cancel all (simulated)"}
+              {cancellable.length > 0 ? ` (${cancellable.length})` : ""}
+            </Button>
+          </div>
+        ) : null}
         {tab === "orders" ? (
           <Table bare>
             <THead>
@@ -86,29 +146,38 @@ export function BottomPanel({ activity }: { activity: TradingActivity }) {
             </THead>
             <tbody>
               {openOrders.length === 0 ? <EmptyRow colSpan={8}>No open orders.</EmptyRow> : null}
-              {openOrders.map((o) => (
-                <TR key={o.id}>
-                  <TD className="text-muted">{fmtDateTime(o.ts)}</TD>
-                  <TD>{o.asset}</TD>
-                  <TD className={o.side === "buy" ? "text-long" : "text-short"}>{o.side}</TD>
-                  <TD>{o.orderType}</TD>
-                  <TD align="right">{fmtUsd(o.sizeUsd)}</TD>
-                  <TD align="right">{fmtAmount(o.priceUsd, 2)}</TD>
-                  <TD className="text-muted">{o.status.replace("_", " ")}</TD>
-                  <TD align="right">
-                    {/* Flash cancels need a signed cancel message that ARENA cannot build yet, so this links out. */}
-                    <a
-                      href={DEFINITIVE_APP_URL}
-                      target="_blank"
-                      rel="noreferrer"
-                      title="Flash cancels are signed in the Definitive app. ARENA cannot sign the cancel message yet."
-                      className="text-[11.5px] text-link hover:underline"
-                    >
-                      Cancel via Definitive app ↗
-                    </a>
-                  </TD>
-                </TR>
-              ))}
+              {openOrders.map((o) => {
+                const cancelled = cancelledPaper.has(o.id);
+                return (
+                  <TR key={o.id}>
+                    <TD className="text-muted">{fmtDateTime(o.ts)}</TD>
+                    <TD>{o.asset}</TD>
+                    <TD className={o.side === "buy" ? "text-long" : "text-short"}>{o.side}</TD>
+                    <TD>{o.orderType}</TD>
+                    <TD align="right">{fmtUsd(o.sizeUsd)}</TD>
+                    <TD align="right">{fmtAmount(o.priceUsd, 2)}</TD>
+                    <TD className="text-muted">
+                      {cancelled ? <Badge tone="warn">cancelled (simulated)</Badge> : o.status.replace("_", " ")}
+                    </TD>
+                    <TD align="right">
+                      {cancelled ? null : (
+                        <Button
+                          size="sm"
+                          disabled={busy !== null}
+                          onClick={() => cancelRows([o.id], `Cancelling ${o.id.slice(0, 8)}`)}
+                          title={
+                            liveOrders
+                              ? "Your wallet signs a cancel message. Nothing is sent until you sign."
+                              : "Paper order: marked cancelled locally. Nothing is sent to Flash."
+                          }
+                        >
+                          {liveOrders ? "Cancel" : "Cancel (simulated)"}
+                        </Button>
+                      )}
+                    </TD>
+                  </TR>
+                );
+              })}
             </tbody>
           </Table>
         ) : null}

@@ -4,7 +4,7 @@ import { parseTransaction, type Hex } from "viem";
 
 import { postJson } from "@/lib/api";
 import { toSignable, type SignableTypedData } from "@/lib/typed-data";
-import type { OrderSignatures, TicketInput, TradeQuote } from "@/lib/types";
+import type { CancelPlan, CancelResult, OrderSignatures, TicketInput, TradeQuote } from "@/lib/types";
 
 export type LiveQuote = Extract<TradeQuote, { mode: "live" }>;
 
@@ -51,6 +51,32 @@ export async function executeLiveTrade(
     quoteId: q.quoteId,
     signatures,
   });
+}
+
+/** Flash accepts at most 25 order ids per batch cancel. */
+export const FLASH_CANCEL_BATCH = 25;
+
+/**
+ * Cancels Flash orders with the funder wallet. One signature per batch of up to 25 ids, in the order given.
+ * Returns null in paper mode: nothing was sent, and the caller marks the rows locally.
+ */
+export async function cancelFlashOrders(
+  orderIds: string[],
+  signMessage: (message: string) => Promise<`0x${string}`>,
+): Promise<CancelResult[] | null> {
+  const results: CancelResult[] = [];
+  for (let i = 0; i < orderIds.length; i += FLASH_CANCEL_BATCH) {
+    const plan = await postJson<CancelPlan>("/api/flash/cancel", { orderIds: orderIds.slice(i, i + FLASH_CANCEL_BATCH) });
+    if (plan.mode === "paper") return null;
+    const signature = await signMessage(plan.message);
+    const res = await postJson<{ results: CancelResult[] }>("/api/flash/cancel/submit", {
+      orderIds: plan.orderIds,
+      message: plan.message,
+      signature,
+    });
+    results.push(...res.results);
+  }
+  return results;
 }
 
 /** A Flash setup entry is a serialized transaction. Decode it so the wallet can send it like any other call. */

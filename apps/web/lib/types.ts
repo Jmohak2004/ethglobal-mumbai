@@ -260,6 +260,19 @@ export interface OrderSignatures {
   bracketPermit?: string;
 }
 
+/**
+ * Cancel plan from POST /api/flash/cancel. Paper: nothing is sent anywhere. Live: `message` is the exact text the
+ * funder wallet must sign (EIP-191) before POST /api/flash/cancel/submit.
+ */
+export type CancelPlan = { mode: "paper"; orderIds: string[] } | { mode: "live"; orderIds: string[]; message: string };
+
+/** One order's outcome. `errorCode` is set when ok is false (a Flash batch error code, or an HTTP-derived code). */
+export interface CancelResult {
+  orderId: string;
+  ok: boolean;
+  errorCode: string | null;
+}
+
 export interface ChartReadResult {
   trend: "bullish" | "bearish" | "range";
   keyLevels: number[];

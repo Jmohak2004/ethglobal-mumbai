@@ -4,7 +4,10 @@ import {
   FlashApiError,
   FlashClient,
   FlashMappingError,
+  ORDER_ID_PATTERN,
   approvalRequirements,
+  buildBatchCancelMessage,
+  buildCancelMessage,
   buildOrderRequest,
   intentToQuoteRequest,
   type FlashFill,
@@ -13,11 +16,14 @@ import {
   type QuoteResponse,
 } from "@arena/flash";
 import { BASE_TOKENS, FLASH_API_URL, type OrderIntent } from "@arena/shared";
+import { verifyMessage } from "viem";
 
 import { env, flashLive } from "@/lib/server/env";
 import { ApiError } from "@/lib/server/errors";
 import type {
   Balance,
+  CancelPlan,
+  CancelResult,
   Fill,
   OnchainStep,
   OpenOrder,
@@ -233,6 +239,88 @@ function upstream(err: unknown): ApiError {
     return new ApiError(status, "UPSTREAM", `Flash: ${err.message}`);
   }
   return new ApiError(502, "UPSTREAM", "Flash request failed");
+}
+
+// ---- Cancels: the server states the exact message, the funder wallet signs it, the server checks it ----
+
+/** Flash accepts at most 25 ids per batch cancel. */
+const MAX_CANCEL_IDS = 25;
+/** Paper ids are local labels such as "ord_7f3a21". They never reach Flash. */
+const PAPER_ID = /^[A-Za-z0-9_-]{1,64}$/;
+
+/** 1 to 25 unique ids. Live ids must be lowercase UUIDs, the form Flash signs. */
+export function parseCancelIds(v: unknown, live: boolean): string[] {
+  if (!Array.isArray(v) || v.length < 1 || v.length > MAX_CANCEL_IDS) {
+    throw new ApiError(422, "VALIDATION", `orderIds must be an array of 1 to ${MAX_CANCEL_IDS} ids`);
+  }
+  const ids = v.map((x: unknown) => {
+    const ok = typeof x === "string" && (live ? ORDER_ID_PATTERN.test(x) : PAPER_ID.test(x));
+    if (!ok) throw new ApiError(422, "VALIDATION", live ? "orderIds must be lowercase order UUIDs" : "orderIds are invalid");
+    return x as string;
+  });
+  if (new Set(ids).size !== ids.length) throw new ApiError(422, "VALIDATION", "orderIds must be unique");
+  return ids;
+}
+
+/** One id uses the single-cancel message. Two or more use the batch message. */
+function cancelMessageFor(orderIds: string[]): string {
+  try {
+    return orderIds.length === 1 ? buildCancelMessage(orderIds[0]!) : buildBatchCancelMessage(orderIds);
+  } catch (err) {
+    throw new ApiError(422, "VALIDATION", err instanceof Error ? err.message : "Invalid order ids");
+  }
+}
+
+/** Paper mode: nothing is sent, so there is nothing to sign. Live: the exact message the funder must sign. */
+export function planCancel(orderIds: string[]): CancelPlan {
+  if (!flashLive()) return { mode: "paper", orderIds };
+  return { mode: "live", orderIds, message: cancelMessageFor(orderIds) };
+}
+
+/**
+ * Sends a signed cancel to Flash after checking that the message is the one this server would have issued for
+ * these ids, and that the signature recovers to the signed-in funder. Flash still checks the signature and the
+ * ownership of each order.
+ */
+export async function submitCancel(input: {
+  orderIds: string[];
+  message: string;
+  signature: `0x${string}`;
+  funder: `0x${string}`;
+}): Promise<CancelResult[]> {
+  if (!flashLive()) throw new ApiError(409, "UNAVAILABLE", "Paper mode: cancels are never sent to Flash");
+  if (input.message !== cancelMessageFor(input.orderIds)) {
+    throw new ApiError(422, "VALIDATION", "The signed message does not match these orders. Start the cancel again.");
+  }
+  const signedByFunder = await verifyMessage({
+    address: input.funder,
+    message: input.message,
+    signature: input.signature,
+  }).catch(() => false);
+  if (!signedByFunder) throw new ApiError(401, "UNAUTHENTICATED", "The signature does not match the signed-in wallet");
+
+  const c = flash();
+  try {
+    if (input.orderIds.length === 1) {
+      const orderId = input.orderIds[0]!;
+      try {
+        await c.cancelOrder(orderId, { cancelMessage: input.message, userSignature: input.signature });
+        return [{ orderId, ok: true, errorCode: null }];
+      } catch (err) {
+        // A rejected single cancel is a per-order result, the same shape a batch returns.
+        if (err instanceof FlashApiError) return [{ orderId, ok: false, errorCode: err.code }];
+        throw err;
+      }
+    }
+    const res = await c.batchCancel({ orderIds: input.orderIds, cancelMessage: input.message, userSignature: input.signature });
+    return res.results.map((r) => ({
+      orderId: r.orderId,
+      ok: r.ok,
+      errorCode: r.ok ? null : (r.errorCode ?? "UNKNOWN"),
+    }));
+  } catch (err) {
+    throw upstream(err);
+  }
 }
 
 // ---- Activity (open orders, fills, balances) for one funder ----
