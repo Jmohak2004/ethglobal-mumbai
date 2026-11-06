@@ -61,6 +61,11 @@ export interface ChatRequest {
   tools?: ChatTool[];
   temperature?: number;
   maxTokens?: number;
+  /**
+   * false sends `enable_thinking: false`, which turns off hidden reasoning on models that support it (qwen, glm).
+   * Models that ignore it (e.g. 0gm-1.0) still reason, so callers also leave generous maxTokens.
+   */
+  thinking?: boolean;
 }
 
 export interface ChatCompletionResponse {
@@ -141,6 +146,7 @@ export class ZeroGRouter {
     if (req.tools && req.tools.length > 0) body.tools = req.tools;
     if (req.temperature !== undefined) body.temperature = req.temperature;
     if (req.maxTokens !== undefined) body.max_tokens = req.maxTokens;
+    if (req.thinking === false) body.enable_thinking = false;
 
     const { res, fellBack } = await this.post("/chat/completions", body);
     const data = asCompletion(res.data);

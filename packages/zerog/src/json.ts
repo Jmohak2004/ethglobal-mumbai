@@ -9,6 +9,8 @@ export interface ChatJsonRequest {
   tools?: ChatTool[];
   temperature?: number;
   maxTokens?: number;
+  /** Forwarded to ChatRequest.thinking. */
+  thinking?: boolean;
 }
 
 export type ChatJsonResult<T> =

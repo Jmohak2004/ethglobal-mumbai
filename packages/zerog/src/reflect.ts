@@ -89,7 +89,8 @@ export async function reflect(router: ZeroGRouter, input: ReflectInput): Promise
         },
       ],
       temperature: 0.3,
-      maxTokens: 2048,
+      maxTokens: 8192,
+      thinking: false,
     },
     ReflectionSchema,
   );

@@ -75,7 +75,8 @@ export async function digestInsights(router: ZeroGRouter, input: DigestInput): P
       ],
       tools: input.useWebSearch ? WEB_TOOLS : undefined,
       temperature: 0.2,
-      maxTokens: 2048,
+      maxTokens: 8192,
+      thinking: false,
     },
     DigestSchema,
   );

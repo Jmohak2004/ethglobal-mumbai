@@ -60,7 +60,8 @@ export async function analyzeChart(router: ZeroGRouter, input: AnalyzeChartInput
         },
       ],
       temperature: 0.1,
-      maxTokens: 1024,
+      maxTokens: 4096,
+      thinking: false,
     },
     VisionSchema,
   );

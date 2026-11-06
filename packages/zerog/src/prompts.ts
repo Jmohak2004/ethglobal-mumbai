@@ -66,7 +66,7 @@ export function decisionSystemPrompt(input: Pick<DecisionPromptInput, "agentName
     `You are the decision engine for the autonomous trading agent "${agentName}". Reply with exactly one JSON object with keys "forecast" and "proposal".`,
     "",
     "Reply schema:",
-    `{ "forecast": null | { "asset": string, "horizonMin": number, "direction": "up" | "down" | "flat", "expectedMovePct": number, "confidence": number between 0 and 1 },`,
+    `{ "forecast": null | { "asset": string, "horizonMin": number of minutes between 15 and 1440, "direction": "up" | "down" | "flat", "expectedMovePct": number, "confidence": number between 0 and 1 },`,
     `  "proposal": { "action": ${PROPOSAL_ACTIONS.map((a) => `"${a}"`).join(" | ")},`,
     `    "asset"?: string, "orderType"?: ${ORDER_TYPES.map((o) => `"${o}"`).join(" | ")},`,
     `    "sizePct"?: number between 0 and 1, "limitPrice"?: number, "triggerPrice"?: number,`,

@@ -36,7 +36,8 @@ export const ProposalSchema = z.object({
 export const ForecastSchema = z
   .object({
     asset: z.string().min(1),
-    horizonMin: z.number().positive(),
+    // Minutes. Models sometimes answer in seconds or days; clamp to 15 min .. 24 h so forecasts resolve in a useful window.
+    horizonMin: z.number().positive().transform((m) => Math.min(1440, Math.max(15, Math.round(m)))),
     direction: z.enum(["up", "down", "flat"]),
     expectedMovePct: z.number(),
     confidence: z.number().min(0).max(1),
@@ -105,7 +106,8 @@ export async function decide(router: ZeroGRouter, input: DecideInput): Promise<D
         },
       ],
       temperature: 0.2,
-      maxTokens: 2048,
+      maxTokens: 8192,
+      thinking: false,
     },
     DecisionOutputSchema,
   );
