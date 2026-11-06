@@ -11,9 +11,10 @@ const repoRoot = path.resolve(here, "../..");
 // bun does not hoist @next/env to the app, so resolve it from next's own install.
 const nextDir = path.dirname(createRequire(import.meta.url).resolve("next/package.json"));
 const { loadEnvConfig } = createRequire(path.join(nextDir, "package.json"))("@next/env") as {
-  loadEnvConfig: (dir: string, dev?: boolean) => unknown;
+  loadEnvConfig: (dir: string, dev?: boolean, log?: Console, forceReload?: boolean) => unknown;
 };
-loadEnvConfig(repoRoot, process.env.NODE_ENV !== "production");
+// forceReload: Next has already loaded (and cached) apps/web's env by the time this config runs.
+loadEnvConfig(repoRoot, process.env.NODE_ENV !== "production", console, true);
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
