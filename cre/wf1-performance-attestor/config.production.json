@@ -13,5 +13,6 @@
   "flashApiUrl": "https://flash.definitive.fi/v1",
   "maxFlashPages": 10,
   "humanWallets": [],
-  "gasLimit": "2000000"
+  "gasLimit": "2000000",
+  "maxAgentsPerRun": 10
 }

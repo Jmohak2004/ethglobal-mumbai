@@ -42,6 +42,11 @@ const configSchema = z.object({
   flashApiUrl: z.string(),
   /** Hard cap on Flash list pages per agent. The run fails rather than report a partial history. */
   maxFlashPages: z.number().int().positive(),
+  /**
+   * Agents read per run. CRE caps contract reads per run at 15: 1 listActive + 4 feed reads (2 feeds x
+   * latestRoundData/decimals) leaves room for 10 getAgent calls.
+   */
+  maxAgentsPerRun: z.number().int().positive().max(10),
   /** Extra "human" trading wallets for the Humans board. Commission is 0 for humans. */
   humanWallets: z.array(z.string()),
   gasLimit: z.string(),
@@ -72,7 +77,11 @@ const FLASH_PAGE_SIZE = 200;
 
 function readActiveAgents(runtime: Runtime<Config>, evm: EVMClient, cfg: Config): AgentRow[] {
   const registry = assertDeployed(cfg.agentRegistry, "agentRegistry");
-  const ids = readFn(runtime, evm, registry, AGENT_REGISTRY_ABI, "listActive") as readonly `0x${string}`[];
+  const allIds = readFn(runtime, evm, registry, AGENT_REGISTRY_ABI, "listActive") as readonly `0x${string}`[];
+  const ids = allIds.slice(0, cfg.maxAgentsPerRun);
+  if (allIds.length > ids.length) {
+    runtime.log(`attesting ${ids.length} of ${allIds.length} active agents (maxAgentsPerRun)`);
+  }
   const rows: AgentRow[] = [];
   for (const id of ids) {
     const agent = readFn(runtime, evm, registry, AGENT_REGISTRY_ABI, "getAgent", [id]);
