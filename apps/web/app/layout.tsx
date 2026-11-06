@@ -4,6 +4,8 @@ import type { ReactNode } from "react";
 
 import { TopNav } from "@/components/layout/top-nav";
 import { getRisk } from "@/lib/data";
+import { softRead } from "@/lib/server/soft";
+import type { RiskDisplay } from "@/lib/types";
 
 import { Providers } from "./providers";
 import "./globals.css";
@@ -17,12 +19,13 @@ export const metadata: Metadata = {
 };
 
 export default async function RootLayout({ children }: { children: ReactNode }) {
-  const risk = await getRisk();
+  // Every page renders through this layout, so a DB outage must show UNKNOWN in the nav, not a 500.
+  const risk: RiskDisplay = await softRead("risk oracle read", async () => (await getRisk()).level, "UNKNOWN");
   return (
     <html lang="en" className={`${inter.variable} ${jetbrains.variable} dark`}>
       <body className="min-h-screen bg-bg font-sans text-[13px] text-text antialiased">
         <Providers>
-          <TopNav risk={risk.level} />
+          <TopNav risk={risk} />
           <main className="min-h-[calc(100vh-48px)]">{children}</main>
         </Providers>
       </body>

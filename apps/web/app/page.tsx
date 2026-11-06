@@ -4,6 +4,7 @@ import { LeaderboardControls } from "@/components/leaderboard/leaderboard-contro
 import { LeaderboardTable } from "@/components/leaderboard/leaderboard-table";
 import { StatStrip } from "@/components/leaderboard/stat-strip";
 import { getLeaderboard, getRisk, parseLeaderboardQuery } from "@/lib/data";
+import { dbConfigured } from "@/lib/server/db";
 
 export const metadata = { title: "Leaderboard" };
 
@@ -34,7 +35,7 @@ export default async function LeaderboardPage({
     <div className="flex flex-col gap-3 px-4 py-3">
       <StatStrip {...stats} />
       <Suspense fallback={null}>
-        <LeaderboardControls />
+        <LeaderboardControls windowedStats={!dbConfigured()} />
       </Suspense>
       <LeaderboardTable rows={rows} />
       <p className="text-[11px] text-muted">

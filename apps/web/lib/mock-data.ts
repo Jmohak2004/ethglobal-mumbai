@@ -5,7 +5,6 @@ import type {
   Agent,
   AgentStatus,
   BudgetTier,
-  Candle,
   DecisionOutput,
   Episode,
   ExecutionMode,
@@ -15,7 +14,6 @@ import type {
   InferenceTrace,
   InsightSource,
   Lesson,
-  MarketSnapshot,
   OrderIntent,
   PerformanceStats,
   PolicyVerdict,
@@ -28,6 +26,7 @@ import type {
   AgentTreasury,
   EquityPoint,
   Fill,
+  HumansPrefs,
   LeaderboardQuery,
   OwnedAgent,
   RiskStatus,
@@ -249,6 +248,12 @@ const ENTITY_SEEDS: Seed[] = [...AGENT_SEEDS, ...HUMAN_SEEDS];
 /** Agents created through POST /api/agents this process lifetime. */
 const CREATED = new Map<string, { agent: Agent; allocationUsd: number }>();
 
+/** Owner status changes (pause/resume) made this process lifetime, keyed by agent id. */
+const STATUS_OVERRIDE = new Map<string, AgentStatus>();
+
+/** Mock users' Humans-board opt-in, keyed by lowercase address. */
+const HUMANS_OPT_IN = new Map<string, boolean>();
+
 function insightSourcesFor(s: AgentSeed): InsightSource[] {
   if (s.template === "social_sentiment") {
     return [{ kind: "web_search" }, { kind: "rss", url: "https://example.com/crypto-news.xml" }];
@@ -286,7 +291,7 @@ function agentFromSeed(s: AgentSeed, now: number): Agent {
     config,
     configVersion: 1 + Math.floor(r() * 3),
     configHash: hashOf(`${s.id}:config`),
-    status: s.status,
+    status: STATUS_OVERRIDE.get(s.id) ?? s.status,
     mode: s.mode,
     forkedFrom: s.forkedFrom ?? null,
     createdAt: now - s.daysActive * DAY,
@@ -386,69 +391,6 @@ function treasuryFor(agent: Agent, pnlUsd: number, now: number): AgentTreasury {
 }
 
 // ---------------------------------------------------------------------------
-// Market indicators (computed from candles so the numbers are internally consistent).
-// ---------------------------------------------------------------------------
-
-function ema(vals: number[], n: number): number {
-  if (vals.length === 0) return 0;
-  const k = 2 / (n + 1);
-  let e = vals[0] ?? 0;
-  for (const v of vals) e = v * k + e * (1 - k);
-  return e;
-}
-
-function rsi(vals: number[], n: number): number {
-  const changes: number[] = [];
-  for (let i = 1; i < vals.length; i++) changes.push((vals[i] ?? 0) - (vals[i - 1] ?? 0));
-  const last = changes.slice(-n);
-  const up = last.reduce((a, x) => a + Math.max(x, 0), 0) / n;
-  const down = last.reduce((a, x) => a + Math.max(-x, 0), 0) / n;
-  if (down === 0) return 100;
-  return 100 - 100 / (1 + up / down);
-}
-
-function atr(c: Candle[], n: number): number {
-  const trs: number[] = [];
-  for (let i = 1; i < c.length; i++) {
-    const cur = c[i];
-    const prev = c[i - 1];
-    if (!cur || !prev) continue;
-    trs.push(Math.max(cur.h - cur.l, Math.abs(cur.h - prev.c), Math.abs(cur.l - prev.c)));
-  }
-  const tail = trs.slice(-n);
-  return tail.reduce((a, x) => a + x, 0) / Math.max(1, tail.length);
-}
-
-function stdev(xs: number[]): number {
-  if (xs.length < 2) return 0;
-  const m = xs.reduce((a, x) => a + x, 0) / xs.length;
-  return Math.sqrt(xs.reduce((a, x) => a + (x - m) ** 2, 0) / (xs.length - 1));
-}
-
-function computeIndicators(c: Candle[]): Indicators {
-  const closes = c.map((x) => x.c);
-  const last = closes[closes.length - 1] ?? 0;
-  const past = closes[closes.length - 11] ?? closes[0] ?? last;
-  const rets: number[] = [];
-  for (let i = 1; i < closes.length; i++) {
-    const prev = closes[i - 1] ?? 0;
-    const cur = closes[i] ?? 0;
-    if (prev) rets.push((cur - prev) / prev);
-  }
-  const tail = c.slice(-20);
-  return {
-    emaFast: round(ema(closes, 12), 2),
-    emaSlow: round(ema(closes, 26), 2),
-    rsi14: round(rsi(closes, 14), 1),
-    atr14: round(atr(c, 14), 2),
-    rocPct: round(past ? ((last - past) / past) * 100 : 0, 2),
-    rangeHigh: round(Math.max(...tail.map((x) => x.h)), 2),
-    rangeLow: round(Math.min(...tail.map((x) => x.l)), 2),
-    volatilityPct: round(stdev(rets.slice(-24)) * 100, 3),
-  };
-}
-
-// ---------------------------------------------------------------------------
 // Public data API.
 // ---------------------------------------------------------------------------
 
@@ -489,7 +431,7 @@ export async function getLeaderboard(q: LeaderboardQuery = {}): Promise<Performa
 
 export async function getAgent(id: string): Promise<Agent | null> {
   const created = CREATED.get(id);
-  if (created) return created.agent;
+  if (created) return { ...created.agent, status: STATUS_OVERRIDE.get(id) ?? created.agent.status };
   const seed = AGENT_SEEDS.find((s) => s.id === id);
   return seed ? agentFromSeed(seed, Date.now()) : null;
 }
@@ -702,7 +644,9 @@ export async function getMyAgents(address: string): Promise<OwnedAgent[]> {
     out.push(toOwned(agent, statsFor(s, "all", now), s.allocationUsd));
   }
   for (const c of CREATED.values()) {
-    if (c.agent.ownerAddress.toLowerCase() === me) out.push(toOwned(c.agent, null, c.allocationUsd));
+    if (c.agent.ownerAddress.toLowerCase() !== me) continue;
+    const agent = { ...c.agent, status: STATUS_OVERRIDE.get(c.agent.id) ?? c.agent.status };
+    out.push(toOwned(agent, null, c.allocationUsd));
   }
   return out;
 }
@@ -715,39 +659,6 @@ export async function getHumanStats(address: string): Promise<PerformanceStats |
 
 export async function getTemplates(): Promise<TemplateDef[]> {
   return TEMPLATES;
-}
-
-/** Candles (1h, 200 bars) and indicators for an allowlisted asset. */
-export async function getMarket(asset: string): Promise<MarketSnapshot | null> {
-  const base = ASSET_BASE[asset];
-  if (!base) return null;
-  const now = Date.now();
-  const end = Math.floor(now / HOUR) * HOUR;
-  const r = rng(hashStr(`candles:${asset}`));
-  const raw: Candle[] = [];
-  let px = base.price * 0.94;
-  for (let i = 0; i < 200; i++) {
-    const o = px;
-    const c = o * (1 + (r() - 0.5) * 0.02 + 0.0003);
-    const h = Math.max(o, c) * (1 + r() * 0.004);
-    const l = Math.min(o, c) * (1 - r() * 0.004);
-    raw.push({ t: end - (199 - i) * HOUR, o, h, l, c, v: round(base.volume * (0.4 + r() * 1.2), 2) });
-    px = c;
-  }
-  const lastRaw = raw[raw.length - 1];
-  if (!lastRaw) return null;
-  const scale = base.price / lastRaw.c;
-  const candles: Candle[] = raw.map((k) => ({
-    t: k.t,
-    o: round(k.o * scale, 2),
-    h: round(k.h * scale, 2),
-    l: round(k.l * scale, 2),
-    c: round(k.c * scale, 2),
-    v: k.v,
-  }));
-  const last = candles[candles.length - 1];
-  if (!last) return null;
-  return { asset, priceUsd: last.c, ts: now, candles, indicators: computeIndicators(candles) };
 }
 
 /** Open orders, fills and balances for the trade terminal (mock; no wallet required). */
@@ -792,7 +703,7 @@ export async function getTradingActivity(_address?: string): Promise<TradingActi
 export const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000" as const;
 
 const FORK_TX_KEY = "__arenaMockForks";
-type ForkMap = Map<string, { newAgentId: string; sourceAgentId: string }>;
+type ForkMap = Map<string, { newAgentId: string; sourceAgentId: string; buyer: string }>;
 function forkMap(): ForkMap {
   const g = globalThis as Record<string, unknown>;
   if (!g[FORK_TX_KEY]) g[FORK_TX_KEY] = new Map();
@@ -828,10 +739,40 @@ export function mockCreateAgent(input: {
 }
 
 /** Idempotent on txHash, like the forks table. Returns the clone's id. */
-export function mockRecordFork(txHash: string, sourceAgentId: string, makeClone: () => string): { newAgentId: string; created: boolean } {
+export function mockRecordFork(
+  txHash: string,
+  sourceAgentId: string,
+  buyer: string,
+  makeClone: () => string,
+): { newAgentId: string; created: boolean } {
   const existing = forkMap().get(txHash.toLowerCase());
   if (existing) return { newAgentId: existing.newAgentId, created: false };
   const newAgentId = makeClone();
-  forkMap().set(txHash.toLowerCase(), { newAgentId, sourceAgentId });
+  forkMap().set(txHash.toLowerCase(), { newAgentId, sourceAgentId, buyer: buyer.toLowerCase() });
   return { newAgentId, created: true };
+}
+
+/** True when this buyer has a recorded fork of the source agent (the fork license). */
+export function mockHasForkLicense(agentId: string, buyer: string): boolean {
+  const me = buyer.toLowerCase();
+  for (const f of forkMap().values()) if (f.sourceAgentId === agentId && f.buyer === me) return true;
+  return false;
+}
+
+/** Owner status change. Stopped agents are terminal and are not changed here. */
+export async function mockSetAgentStatus(agentId: string, status: AgentStatus): Promise<Agent | null> {
+  const agent = await getAgent(agentId);
+  if (!agent) return null;
+  STATUS_OVERRIDE.set(agentId, status);
+  return { ...agent, status };
+}
+
+export function mockGetHumansOptIn(address: string): boolean {
+  return HUMANS_OPT_IN.get(address.toLowerCase()) ?? false;
+}
+
+export function mockSetHumansOptIn(address: string, optIn: boolean): HumansPrefs {
+  const key = address.toLowerCase() as `0x${string}`;
+  HUMANS_OPT_IN.set(key, optIn);
+  return { address: key, humansBoardOptIn: optIn };
 }

@@ -7,12 +7,12 @@ import { OwnerSection } from "@/components/agent/owner-section";
 import { StatsGrid } from "@/components/agent/stats-grid";
 import { StrategyPanel } from "@/components/agent/strategy-panel";
 import { Panel } from "@/components/ui/panel";
-import { getAgent, getAgentEquityCurve, getLeaderboard } from "@/lib/data";
+import { getAgentEquityCurve, getLeaderboard, getPublicAgent } from "@/lib/data";
 import { getTemplate } from "@/lib/templates";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const agent = await getAgent(id);
+  const agent = await getPublicAgent(id);
   return { title: agent ? agent.name : "Agent not found" };
 }
 
@@ -47,7 +47,8 @@ export default async function AgentPage({
 }) {
   const { id } = await params;
   const sp = await searchParams;
-  const agent = await getAgent(id);
+  // Public projection only. The full config is never rendered here; owners and licensees get it from the API.
+  const agent = await getPublicAgent(id);
   if (!agent) notFound();
 
   const [board, equity] = await Promise.all([
@@ -58,10 +59,10 @@ export default async function AgentPage({
   const rankIdx = board.findIndex((s) => s.entityId === id);
   const stats = rankIdx >= 0 ? board[rankIdx] : undefined;
   const resolved =
-    stats ?? emptyStats(agent.id, agent.name, agent.config.template, agent.mode, false);
+    stats ?? emptyStats(agent.id, agent.name, agent.template, agent.mode, false);
   const rank = rankIdx >= 0 ? rankIdx + 1 : null;
 
-  const template = getTemplate(agent.config.template);
+  const template = getTemplate(agent.template);
   const forkedFromName = agent.forkedFrom
     ? (board.find((s) => s.entityId === agent.forkedFrom)?.name ?? agent.forkedFrom)
     : null;
@@ -71,7 +72,7 @@ export default async function AgentPage({
       <AgentHeader
         agent={agent}
         stats={resolved}
-        templateName={template?.name ?? agent.config.template}
+        templateName={template?.name ?? agent.template}
         rank={rank}
         forkedFromName={forkedFromName}
       />
@@ -89,7 +90,7 @@ export default async function AgentPage({
         </Panel>
       </div>
 
-      <OwnerSection agentId={agent.id} ownerAddress={agent.ownerAddress} demo={sp.owner === "1"} />
+      <OwnerSection agentId={agent.id} status={agent.status} demo={sp.owner === "1"} />
     </div>
   );
 }

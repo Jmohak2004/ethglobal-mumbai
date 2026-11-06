@@ -93,7 +93,7 @@ export function AiChartRead({
   const aiSl = analysis ? Math.round(px * (1 - (analysis.suggestedSliders.stopLossPct ?? 2) / 100) * 100) / 100 : null;
 
   return (
-    <Modal open={open} onClose={onClose} title={`AI chart read · ${market.asset} 1h`} width="max-w-lg">
+    <Modal open={open} onClose={onClose} title={`AI chart read · ${market.asset} 5m`} width="max-w-lg">
       <div className="flex flex-col gap-3 text-[12.5px]">
         <div
           className="flex flex-col gap-2 rounded-md border border-dashed border-border p-3"

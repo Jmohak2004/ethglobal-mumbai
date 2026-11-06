@@ -3,6 +3,7 @@
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import { Tabs, type TabItem } from "@/components/ui/tabs";
+import { Tooltip } from "@/components/ui/tooltip";
 import { TEMPLATES, TIMEFRAMES } from "@/lib/templates";
 
 type Kind = "agent" | "human" | "all";
@@ -22,8 +23,12 @@ const MODES = [
 const selectCls =
   "h-7 rounded-md border border-border bg-panel px-2 text-[12px] text-text focus:border-link focus:outline-none";
 
-/** Kind tabs and filters. State lives in the URL so the server re-renders the leaderboard. */
-export function LeaderboardControls() {
+/**
+ * Kind tabs and filters. State lives in the URL so the server re-renders the leaderboard.
+ * `windowedStats` is false on the DB path, which serves all-time stats only: the timeframe control then shows
+ * "All time" alone instead of a filter that does nothing.
+ */
+export function LeaderboardControls({ windowedStats }: { windowedStats: boolean }) {
   const router = useRouter();
   const pathname = usePathname();
   const sp = useSearchParams();
@@ -59,18 +64,26 @@ export function LeaderboardControls() {
             </option>
           ))}
         </select>
-        <select
-          aria-label="Timeframe"
-          className={selectCls}
-          value={timeframe}
-          onChange={(e) => update("timeframe", e.target.value)}
-        >
-          {TIMEFRAMES.map((t) => (
-            <option key={t.value} value={t.value}>
-              {t.label}
-            </option>
-          ))}
-        </select>
+        {windowedStats ? (
+          <select
+            aria-label="Timeframe"
+            className={selectCls}
+            value={timeframe}
+            onChange={(e) => update("timeframe", e.target.value)}
+          >
+            {TIMEFRAMES.map((t) => (
+              <option key={t.value} value={t.value}>
+                {t.label}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <Tooltip side="bottom" align="end" content={<span>windowed stats coming soon</span>}>
+            <select aria-label="Timeframe" aria-disabled="true" className={`${selectCls} cursor-not-allowed opacity-70`} value="all" onChange={() => undefined}>
+              <option value="all">All time</option>
+            </select>
+          </Tooltip>
+        )}
         <select aria-label="Mode" className={selectCls} value={mode} onChange={(e) => update("mode", e.target.value)}>
           {MODES.map((m) => (
             <option key={m.value} value={m.value}>

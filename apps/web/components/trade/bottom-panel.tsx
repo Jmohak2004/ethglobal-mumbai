@@ -5,12 +5,10 @@ import { useState } from "react";
 import { useAccount } from "wagmi";
 
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Tabs, type TabItem } from "@/components/ui/tabs";
-import { useToast } from "@/components/ui/toast";
 import { EmptyRow, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { getJson } from "@/lib/api";
-import { fmtAmount, fmtDateTime, fmtUsd, pnlClass, shortHash, txUrl } from "@/lib/format";
+import { DEFINITIVE_APP_URL, fmtAmount, fmtDateTime, fmtUsd, pnlClass, shortHash, txUrl } from "@/lib/format";
 import { usePlatform } from "@/lib/hooks/use-platform";
 import { useSession } from "@/lib/hooks/use-session";
 import { usePaperFills } from "@/lib/paper-fills";
@@ -32,7 +30,6 @@ type LiveActivity = TradingActivity & { live: boolean };
  */
 export function BottomPanel({ activity }: { activity: TradingActivity }) {
   const [tab, setTab] = useState<BottomTab>("orders");
-  const toast = useToast();
   const { address } = useAccount();
   const session = useSession({ prompt: false });
   const platform = usePlatform();
@@ -99,13 +96,16 @@ export function BottomPanel({ activity }: { activity: TradingActivity }) {
                   <TD align="right">{fmtAmount(o.priceUsd, 2)}</TD>
                   <TD className="text-muted">{o.status.replace("_", " ")}</TD>
                   <TD align="right">
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => toast({ title: "Cancel not wired yet", description: "Needs a signed Flash cancel message." })}
+                    {/* Flash cancels need a signed cancel message that ARENA cannot build yet, so this links out. */}
+                    <a
+                      href={DEFINITIVE_APP_URL}
+                      target="_blank"
+                      rel="noreferrer"
+                      title="Flash cancels are signed in the Definitive app. ARENA cannot sign the cancel message yet."
+                      className="text-[11.5px] text-link hover:underline"
                     >
-                      Cancel
-                    </Button>
+                      Cancel via Definitive app ↗
+                    </a>
                   </TD>
                 </TR>
               ))}

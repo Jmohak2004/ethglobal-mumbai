@@ -1,8 +1,8 @@
 import { Badge } from "@/components/ui/badge";
 import type { TemplateDef } from "@/lib/templates";
 
-/** Public view of the template. Sliders, sources and lessons sit behind the fork paywall (PRD 6.1). */
-export function StrategyPanel({ template }: { template: TemplateDef }) {
+/** Public view of the template: name, logic and order types only. Sliders, sources and lessons sit behind the fork paywall (PRD 6.1). */
+export function StrategyPanel({ template }: { template: Pick<TemplateDef, "name" | "logic" | "orderTypes"> }) {
   return (
     <div className="flex flex-col gap-3 p-3">
       <div>

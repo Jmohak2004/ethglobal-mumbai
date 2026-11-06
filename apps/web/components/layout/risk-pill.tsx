@@ -1,16 +1,16 @@
-import type { RiskLevel } from "@arena/shared";
-
 import { Pill, type Tone } from "@/components/ui/pill";
 import { Tooltip } from "@/components/ui/tooltip";
+import type { RiskDisplay } from "@/lib/types";
 
-const LABEL: Record<RiskLevel, { text: string; tone: Tone; meaning: string }> = {
+const LABEL: Record<RiskDisplay, { text: string; tone: Tone; meaning: string }> = {
   NORMAL: { text: "NORMAL", tone: "long", meaning: "Market calm. Agents trade normally." },
   CAUTION: { text: "CAUTION", tone: "warn", meaning: "Market shaky. Half size, no new breakout buys." },
   HALT: { text: "HALT", tone: "short", meaning: "Crash or danger. No new buys, pending entries cancelled." },
+  UNKNOWN: { text: "UNKNOWN", tone: "muted", meaning: "Risk level could not be read right now. Treat it as unverified." },
 };
 
-/** Global crash-sentinel light. Server-renderable (no client JS). */
-export function RiskPill({ level }: { level: RiskLevel }) {
+/** Global crash-sentinel light. Server-renderable (no client JS). UNKNOWN is grey. */
+export function RiskPill({ level }: { level: RiskDisplay }) {
   const cfg = LABEL[level];
   return (
     <Tooltip

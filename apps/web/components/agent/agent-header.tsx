@@ -1,4 +1,4 @@
-import type { Agent, PerformanceStats } from "@arena/shared";
+import type { AgentStatus, PerformanceStats } from "@arena/shared";
 import Link from "next/link";
 
 import { PaperBadge, SelfFundedBadge, VerifiedBadge } from "@/components/badges";
@@ -6,16 +6,17 @@ import { ForkButton } from "@/components/agent/fork-button";
 import { ShareCardButton, type ShareCard } from "@/components/agent/share-card-button";
 import { Badge } from "@/components/ui/badge";
 import { Pill, type Tone } from "@/components/ui/pill";
-import { fmtDate, fmtPct, shortAddr } from "@/lib/format";
+import { fmtDate, fmtPct } from "@/lib/format";
 import { FORK_PLATFORM_BPS } from "@/lib/templates";
+import type { PublicAgent } from "@/lib/types";
 
-const STATUS: Record<Agent["status"], { tone: Tone; label: string }> = {
+const STATUS: Record<AgentStatus, { tone: Tone; label: string }> = {
   active: { tone: "long", label: "Active" },
   paused: { tone: "warn", label: "Paused" },
   stopped: { tone: "muted", label: "Stopped" },
 };
 
-/** Agent page header: identity, badges, fork and share actions. */
+/** Agent page header: identity, badges, fork and share actions. Public projection only (PRD 6.1). */
 export function AgentHeader({
   agent,
   stats,
@@ -23,7 +24,7 @@ export function AgentHeader({
   rank,
   forkedFromName,
 }: {
-  agent: Agent;
+  agent: PublicAgent;
   stats: PerformanceStats;
   templateName: string;
   rank: number | null;
@@ -34,7 +35,7 @@ export function AgentHeader({
   const card: ShareCard = {
     id: agent.id,
     name: agent.name,
-    templateId: agent.config.template,
+    templateId: agent.template,
     templateName,
     pnlPct: stats.realizedPnlPct,
     pnlUsd: stats.realizedPnlUsd,
@@ -63,7 +64,7 @@ export function AgentHeader({
           <PaperBadge mode={agent.mode} />
         </div>
         <div className="num flex flex-wrap items-center gap-x-3 gap-y-1 text-[11.5px] text-muted">
-          <span>Owner {shortAddr(agent.ownerAddress)}</span>
+          <span>Owner {agent.ownerShort}</span>
           <span>Created {fmtDate(agent.createdAt)}</span>
           <span>Config v{agent.configVersion}</span>
           <span>Mode {agent.mode}</span>
@@ -85,8 +86,8 @@ export function AgentHeader({
         <ShareCardButton card={card} />
         <ForkButton
           agentId={agent.id}
-          forkable={agent.config.fork.forkable}
-          priceUsd={agent.config.fork.priceUsd}
+          forkable={agent.forkable}
+          priceUsd={agent.forkPriceUsd}
           creatorPct={100 - platformPct}
           platformPct={platformPct}
         />

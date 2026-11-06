@@ -4,7 +4,17 @@
 // resolved from its real path, which a bundler cannot reproduce, and its source has a type error in
 // repo/treasury.ts that would fail this app's typecheck. Mock mode (no DATABASE_URL) never loads it at all.
 // The facade below mirrors the packages/db repo signatures this app uses.
-import type { Agent, Episode, ExecutionMode, Lesson, PerformanceStats, RiskLevel, StrategyConfig, TemplateId } from "@arena/shared";
+import type {
+  Agent,
+  AgentStatus,
+  Episode,
+  ExecutionMode,
+  Lesson,
+  PerformanceStats,
+  RiskLevel,
+  StrategyConfig,
+  TemplateId,
+} from "@arena/shared";
 import type { InferenceTrace } from "@arena/shared";
 import type { RiskReason } from "@arena/shared";
 
@@ -20,6 +30,12 @@ export interface Repo {
   ): Promise<PerformanceStats[]>;
   getAgent(db: Db, id: string): Promise<Agent | null>;
   listByOwner(db: Db, ownerAddress: string): Promise<Agent[]>;
+  setAgentStatus(db: Db, agentId: string, status: AgentStatus): Promise<Agent | null>;
+  getUser(
+    db: Db,
+    address: string,
+  ): Promise<{ address: string; humansBoardOptIn: boolean; displayName: string | null; tgHandle: string | null } | null>;
+  upsertUser(db: Db, input: { address: string; humansBoardOptIn?: boolean }): Promise<{ address: string; humansBoardOptIn: boolean }>;
   createAgent(
     db: Db,
     input: {
@@ -44,7 +60,10 @@ export interface Repo {
   latestRisk(
     db: Db,
   ): Promise<{ level: RiskLevel; reasonCode: RiskReason; asOf: number; txHash: `0x${string}` | null } | null>;
-  listForksByBuyer(db: Db, buyer: string): Promise<{ txHash: `0x${string}`; newAgentId: string | null }[]>;
+  listForksByBuyer(
+    db: Db,
+    buyer: string,
+  ): Promise<{ agentId: string; txHash: `0x${string}`; newAgentId: string | null }[]>;
   insertFork(
     db: Db,
     input: {

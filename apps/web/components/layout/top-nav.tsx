@@ -7,7 +7,7 @@ import { usePathname } from "next/navigation";
 import { RiskPill } from "@/components/layout/risk-pill";
 import { SettingsPopover } from "@/components/layout/settings-popover";
 import { WalletButton } from "@/components/layout/wallet-button";
-import type { RiskLevel } from "@arena/shared";
+import type { RiskDisplay } from "@/lib/types";
 
 const LINKS = [
   { href: "/", label: "Leaderboard" },
@@ -16,7 +16,7 @@ const LINKS = [
   { href: "/portfolio", label: "Portfolio" },
 ];
 
-export function TopNav({ risk }: { risk: RiskLevel }) {
+export function TopNav({ risk }: { risk: RiskDisplay }) {
   const path = usePathname();
   return (
     <header className="sticky top-0 z-40 flex h-12 items-center gap-6 border-b border-border bg-bg px-4">

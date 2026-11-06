@@ -3,19 +3,22 @@
 // the same functions serve the deterministic mock data in lib/mock-data.ts (logged once at startup).
 // Server-only: never import from a client component (use lib/types.ts for types).
 import { RiskReason, agentIdToBytes32 } from "@arena/shared";
-import type { Agent, Episode, ExecutionMode, Lesson, PerformanceStats, StrategyConfig } from "@arena/shared";
+import type { Agent, AgentStatus, Episode, ExecutionMode, Lesson, PerformanceStats, StrategyConfig } from "@arena/shared";
 import { env } from "@/lib/server/env";
 import { dbContext, type Db, type Repo } from "@/lib/server/db";
 import { readTreasuryAccount } from "@/lib/server/chain";
 import { ApiError } from "@/lib/server/errors";
+import { shortAddr } from "@/lib/format";
 import { round4, tierFor } from "@/lib/treasury-math";
 import * as mock from "@/lib/mock-data";
 import { TEMPLATES, type TemplateDef } from "@/lib/templates";
 import type {
   AgentTreasury,
   EquityPoint,
+  HumansPrefs,
   LeaderboardQuery,
   OwnedAgent,
+  PublicAgent,
   RiskStatus,
   TopUp,
   TradingActivity,
@@ -56,10 +59,72 @@ export async function getLeaderboard(q: LeaderboardQuery = {}): Promise<Performa
   return rows.sort((a, b) => b.realizedPnlPct - a.realizedPnlPct);
 }
 
+/**
+ * Full agent record, config included. Server-internal: routes and pages must not return it to anyone who is not
+ * the owner or a fork licensee. Public reads go through getPublicAgent and the agent route's viewer check.
+ */
 export async function getAgent(id: string): Promise<Agent | null> {
   const ctx = await dbContext();
   if (!ctx) return mock.getAgent(id);
   return ctx.r.getAgent(ctx.db, id);
+}
+
+/** Stats-only projection of an agent (PRD 6.1). No config, sources, lessons, limits or full owner address. */
+export function toPublicAgent(agent: Agent): PublicAgent {
+  return {
+    id: agent.id,
+    name: agent.name,
+    template: agent.config.template,
+    mode: agent.mode,
+    status: agent.status,
+    ownerShort: shortAddr(agent.ownerAddress),
+    forkable: agent.config.fork.forkable,
+    forkPriceUsd: agent.config.fork.priceUsd,
+    forkedFrom: agent.forkedFrom,
+    configVersion: agent.configVersion,
+    createdAt: agent.createdAt,
+  };
+}
+
+export async function getPublicAgent(id: string): Promise<PublicAgent | null> {
+  const agent = await getAgent(id);
+  return agent ? toPublicAgent(agent) : null;
+}
+
+/** True when the buyer paid StrategyMarketplace.fork for this agent (a recorded fork with buyer == address). */
+export async function hasForkLicense(agentId: string, buyer: string): Promise<boolean> {
+  const ctx = await dbContext();
+  if (!ctx) return mock.mockHasForkLicense(agentId, buyer);
+  const me = buyer.toLowerCase();
+  const forks = await ctx.r.listForksByBuyer(ctx.db, me);
+  return forks.some((f) => f.agentId === agentId);
+}
+
+/**
+ * Owner pause/resume. Stopped is terminal and is set by the platform, so it is not accepted here. Returns null when
+ * the agent does not exist.
+ */
+export async function setAgentStatus(id: string, status: Exclude<AgentStatus, "stopped">): Promise<Agent | null> {
+  const ctx = await dbContext();
+  if (!ctx) return mock.mockSetAgentStatus(id, status);
+  return ctx.r.setAgentStatus(ctx.db, id, status);
+}
+
+/** Humans-board opt-in for a wallet. Users without a row are not opted in. */
+export async function getHumansPrefs(address: string): Promise<HumansPrefs> {
+  const key = address.toLowerCase() as `0x${string}`;
+  const ctx = await dbContext();
+  if (!ctx) return { address: key, humansBoardOptIn: mock.mockGetHumansOptIn(key) };
+  const user = await ctx.r.getUser(ctx.db, key);
+  return { address: key, humansBoardOptIn: user?.humansBoardOptIn ?? false };
+}
+
+export async function setHumansBoardOptIn(address: string, optIn: boolean): Promise<HumansPrefs> {
+  const key = address.toLowerCase() as `0x${string}`;
+  const ctx = await dbContext();
+  if (!ctx) return mock.mockSetHumansOptIn(key, optIn);
+  const user = await ctx.r.upsertUser(ctx.db, { address: key, humansBoardOptIn: optIn });
+  return { address: key, humansBoardOptIn: user.humansBoardOptIn };
 }
 
 /** Decision log (owner-only, enforced by the route). Newest first. */
@@ -142,9 +207,6 @@ export async function getTemplates(): Promise<TemplateDef[]> {
   return TEMPLATES;
 }
 
-/** Candles (1h, 200 bars) and indicators for an allowlisted asset. Market data is mock until a feed is wired. */
-export const getMarket = mock.getMarket;
-
 /**
  * Open orders, fills and balances. The DB path returns nothing: live Flash activity is fetched per wallet
  * from /api/flash/orders. The mock path returns demo rows.
@@ -203,7 +265,7 @@ export async function forkAgent(input: {
   const ctx = await dbContext();
 
   if (!ctx) {
-    return mock.mockRecordFork(input.txHash, input.sourceId, () =>
+    return mock.mockRecordFork(input.txHash, input.sourceId, input.buyer, () =>
       mock.mockCreateAgent({
         name: forkName(source.name),
         ownerAddress: input.buyer,

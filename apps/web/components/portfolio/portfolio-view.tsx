@@ -1,7 +1,7 @@
 "use client";
 
 import { useConnectModal } from "@rainbow-me/rainbowkit";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { PerformanceStats } from "@arena/shared";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
@@ -18,14 +18,14 @@ import { Pill, type Tone } from "@/components/ui/pill";
 import { SkeletonRows } from "@/components/ui/skeleton";
 import { EmptyRow, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
-import { describeError, getJson } from "@/lib/api";
+import { describeError, getJson, postJson } from "@/lib/api";
 import { CONTRACTS } from "@/lib/contracts";
 import { fmtBps, fmtNum, fmtPct, fmtUsd, fmtUsdSigned, pnlClass, shortAddr } from "@/lib/format";
 import { usePlatform } from "@/lib/hooks/use-platform";
 import { useSession } from "@/lib/hooks/use-session";
 import { fundOnchain, NotDeployedError, withdrawOnchain } from "@/lib/onchain";
 import { DEMO_OWNER, getTemplate } from "@/lib/templates";
-import type { OwnedAgent } from "@/lib/types";
+import type { HumansPrefs, OwnedAgent } from "@/lib/types";
 import { wagmiConfig } from "@/lib/wagmi";
 
 const TELEGRAM_BOT = process.env.NEXT_PUBLIC_TELEGRAM_BOT || "arena_demo_bot";
@@ -104,12 +104,12 @@ export function PortfolioView() {
           ) : agents.isError ? (
             <div className="p-3 text-[12px] text-short">{describeError(agents.error)}</div>
           ) : (
-            <MyAgentsTable agents={agents.data ?? []} />
+            <MyAgentsTable agents={agents.data ?? []} demo={demo && !isConnected} />
           )}
         </Panel>
 
         <div className="flex flex-col gap-3">
-          <HumanCard owner={owner} stats={human.data ?? null} loading={human.isPending} />
+          <HumanCard owner={owner} stats={human.data ?? null} loading={human.isPending} signedIn={session.signedIn} />
           <TelegramCard />
         </div>
       </div>
@@ -117,10 +117,11 @@ export function PortfolioView() {
   );
 }
 
-function MyAgentsTable({ agents }: { agents: OwnedAgent[] }) {
+function MyAgentsTable({ agents, demo }: { agents: OwnedAgent[]; demo: boolean }) {
   const toast = useToast();
   const [fundFor, setFundFor] = useState<OwnedAgent | null>(null);
   const [withdrawing, setWithdrawing] = useState<string | null>(null);
+  const [statusBusy, setStatusBusy] = useState<string | null>(null);
   const qc = useQueryClient();
   const { openConnectModal } = useConnectModal();
   const { address } = useAccount();
@@ -140,6 +141,21 @@ function MyAgentsTable({ agents }: { agents: OwnedAgent[] }) {
       });
     } finally {
       setWithdrawing(null);
+    }
+  };
+
+  /** Owner pause/resume through the API (session-gated; the demo owner uses ?owner=1 outside production). */
+  const toggleStatus = async (a: OwnedAgent) => {
+    const next = a.status === "active" ? "paused" : "active";
+    setStatusBusy(a.id);
+    try {
+      await postJson(`/api/agents/${a.id}/status${demo ? "?owner=1" : ""}`, { status: next });
+      toast({ title: next === "paused" ? "Paused" : "Resumed", description: `${a.name} is now ${next}.`, tone: "success" });
+      await qc.invalidateQueries({ queryKey: ["my-agents"] });
+    } catch (err) {
+      toast({ title: "Status change failed", description: describeError(err), tone: "error" });
+    } finally {
+      setStatusBusy(null);
     }
   };
 
@@ -204,14 +220,11 @@ function MyAgentsTable({ agents }: { agents: OwnedAgent[] }) {
                     <Button
                       size="sm"
                       variant="ghost"
-                      onClick={() =>
-                        toast({
-                          title: `${a.status === "active" ? "Pause" : "Resume"} not wired yet`,
-                          description: "Needs an owner-signed status change.",
-                        })
-                      }
+                      disabled={a.status === "stopped" || statusBusy === a.id}
+                      title={a.status === "stopped" ? "Stopped agents cannot be changed" : undefined}
+                      onClick={() => toggleStatus(a)}
                     >
-                      {a.status === "active" ? "Pause" : "Resume"}
+                      {statusBusy === a.id ? "Saving…" : a.status === "active" ? "Pause" : a.status === "paused" ? "Resume" : "Stopped"}
                     </Button>
                     <Button
                       size="sm"
@@ -289,9 +302,38 @@ function FundModal({ agent, onClose }: { agent: OwnedAgent; onClose: () => void 
   );
 }
 
-function HumanCard({ owner, stats, loading }: { owner: string; stats: PerformanceStats | null; loading: boolean }) {
+function HumanCard({
+  owner,
+  stats,
+  loading,
+  signedIn,
+}: {
+  owner: string;
+  stats: PerformanceStats | null;
+  loading: boolean;
+  signedIn: boolean;
+}) {
   const toast = useToast();
-  const [joined, setJoined] = useState(false);
+  const qc = useQueryClient();
+  const prefs = useQuery({
+    queryKey: ["humans-prefs"],
+    queryFn: () => getJson<HumansPrefs>("/api/users/me"),
+    enabled: signedIn,
+    retry: false,
+  });
+  const save = useMutation({
+    mutationFn: (optIn: boolean) => postJson<HumansPrefs>("/api/users/me", { humansBoardOptIn: optIn }),
+    onSuccess: (next) => {
+      qc.setQueryData(["humans-prefs"], next);
+      toast({
+        title: next.humansBoardOptIn ? "Opted in to Humans board" : "Opted out",
+        description: next.humansBoardOptIn ? "Your manual trades are eligible for the Humans board." : "Your manual trades are no longer ranked.",
+        tone: "success",
+      });
+    },
+    onError: (err) => toast({ title: "Could not save", description: describeError(err), tone: "error" }),
+  });
+  const joined = prefs.data?.humansBoardOptIn ?? false;
   return (
     <Panel
       title="Humans board"
@@ -301,14 +343,8 @@ function HumanCard({ owner, stats, loading }: { owner: string; stats: Performanc
           <Switch
             label="Join Humans board"
             checked={joined}
-            onChange={(v) => {
-              setJoined(v);
-              toast({
-                title: v ? "Opted in to Humans board" : "Opted out",
-                description: "Local stub. Ranking needs a CRE attestation of your fills.",
-                tone: "success",
-              });
-            }}
+            disabled={!signedIn || !prefs.isSuccess || save.isPending}
+            onChange={(v) => save.mutate(v)}
           />
         </div>
       }
@@ -334,6 +370,7 @@ function HumanCard({ owner, stats, loading }: { owner: string; stats: Performanc
         ) : (
           <div className="text-[12px] text-muted">No manual trades yet for {shortAddr(owner)}. Trade on the Trade page.</div>
         )}
+        {!signedIn ? <div className="text-[11px] text-muted">Sign in with your wallet to change the opt-in.</div> : null}
         {stats?.verified ? (
           <Badge tone="link">✓ CRE-verified stats</Badge>
         ) : (

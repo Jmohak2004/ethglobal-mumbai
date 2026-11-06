@@ -1,6 +1,17 @@
 // View types shared by server (lib/data.ts, route handlers) and client components.
 // Type-only module: safe to import from client code.
-import type { Agent, BudgetTier, ExecutionMode, FlashOrderType, PerformanceStats, RiskLevel, TemplateId } from "@arena/shared";
+import type {
+  Agent,
+  AgentStatus,
+  BudgetTier,
+  ExecutionMode,
+  FlashOrderType,
+  MarketSnapshot,
+  PerformanceStats,
+  RiskLevel,
+  StrategyConfig,
+  TemplateId,
+} from "@arena/shared";
 import type { RiskReason } from "@arena/shared";
 import type { Timeframe } from "@/lib/templates";
 
@@ -54,11 +65,54 @@ export interface RiskStatus {
   reportTx: `0x${string}`;
 }
 
+/** What the nav shows. UNKNOWN means the risk oracle could not be read (DB down, timeout). */
+export type RiskDisplay = RiskLevel | "UNKNOWN";
+
 export interface OwnedAgent extends Agent {
   stats: PerformanceStats | null;
   allocationUsd: number;
   budgetTier: BudgetTier;
   withdrawableUsd: number;
+}
+
+/**
+ * Public agent record (PRD 6.1, stats-only). Carries no config, sources, lessons or limits, and not the full
+ * owner address. Full config is returned only by GET /api/agents/[id] to the owner or a fork licensee.
+ */
+export interface PublicAgent {
+  id: string;
+  name: string;
+  template: TemplateId;
+  mode: ExecutionMode;
+  status: AgentStatus;
+  /** Shortened owner address for display (0xabcd…ef12). */
+  ownerShort: string;
+  forkable: boolean;
+  forkPriceUsd: number;
+  forkedFrom: string | null;
+  configVersion: number;
+  createdAt: number;
+}
+
+/** GET /api/agents/[id]. `config` is present only when `viewer` is "owner" or "licensee". */
+export interface AgentView extends PublicAgent {
+  viewer: "owner" | "licensee" | "public";
+  config?: StrategyConfig;
+}
+
+/** Live market for /trade: Coinbase Exchange candles (ascending) with 24h stats. */
+export interface MarketResponse extends MarketSnapshot {
+  granularity: number;
+  change24hPct: number;
+  high24h: number;
+  low24h: number;
+  volume24h: number;
+  source: "coinbase";
+}
+
+export interface HumansPrefs {
+  address: `0x${string}`;
+  humansBoardOptIn: boolean;
 }
 
 export interface EquityPoint {

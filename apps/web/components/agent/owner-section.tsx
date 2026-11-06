@@ -1,7 +1,9 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
-import type { Episode, Lesson } from "@arena/shared";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import type { AgentStatus, Episode, Lesson } from "@arena/shared";
+import { useRouter } from "next/navigation";
+import { useState } from "react";
 import { useAccount } from "wagmi";
 
 import { BudgetCard } from "@/components/agent/budget-card";
@@ -13,69 +15,65 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/ui/panel";
 import { SkeletonRows } from "@/components/ui/skeleton";
-import { ApiClientError, getJson } from "@/lib/api";
+import { useToast } from "@/components/ui/toast";
+import { ApiClientError, describeError, getJson, postJson } from "@/lib/api";
 import { useSession } from "@/lib/hooks/use-session";
 import type { AgentTreasury } from "@/lib/types";
 
 /**
- * Owner-only console. Shown when the server session is the agent owner (signed once with the owner wallet), or
- * with ?owner=1 for the demo outside production. The API enforces the same rule; this only decides what to render.
+ * Owner-only console. Requests run only when a wallet session exists (or ?owner=1 for the demo outside production).
+ * The server decides ownership: a signed-in non-owner gets 403 and the console stays closed.
  */
-export function OwnerSection({ agentId, ownerAddress, demo }: { agentId: string; ownerAddress: string; demo: boolean }) {
-  const owner = ownerAddress.toLowerCase();
+export function OwnerSection({ agentId, status, demo }: { agentId: string; status: AgentStatus; demo: boolean }) {
   const { address } = useAccount();
-  const connectedIsOwner = !!address && address.toLowerCase() === owner;
-  const session = useSession({ prompt: connectedIsOwner });
-  const isOwner = demo || session.signedAddress === owner;
+  const session = useSession({ prompt: false });
+  const enabled = demo || session.signedAddress !== null;
   const q = demo ? "?owner=1" : "";
 
   const episodes = useQuery({
     queryKey: ["episodes", agentId, demo],
     queryFn: () => getJson<Episode[]>(`/api/agents/${agentId}/episodes${q}`),
-    enabled: isOwner,
+    enabled,
     retry: false,
   });
   const lessons = useQuery({
     queryKey: ["lessons", agentId, demo],
     queryFn: () => getJson<Lesson[]>(`/api/agents/${agentId}/lessons${q}`),
-    enabled: isOwner,
+    enabled,
     retry: false,
   });
   const treasury = useQuery({
     queryKey: ["treasury", agentId, demo],
     queryFn: () => getJson<AgentTreasury>(`/api/agents/${agentId}/treasury${q}`),
-    enabled: isOwner,
+    enabled,
     retry: false,
   });
 
-  if (!isOwner) {
+  const signInButton =
+    address && !session.signedIn ? (
+      <Button variant="secondary" onClick={() => session.signIn().catch(() => undefined)}>
+        Sign in with wallet
+      </Button>
+    ) : null;
+
+  if (!enabled) {
     return (
       <div className="flex flex-wrap items-center gap-3 rounded-md border border-dashed border-border px-4 py-3 text-[12px] text-muted">
-        <span>Owner console: connect the owner wallet and sign in to see the decision log, guardrail blocks, AI budget and treasury.</span>
-        {connectedIsOwner && session.ready ? (
-          <Button
-            variant="secondary"
-            onClick={() => session.signIn().catch(() => undefined)}
-          >
-            Sign in as owner
-          </Button>
-        ) : null}
+        <span>Owner console: sign in with the owner wallet to see the decision log, guardrail blocks, AI budget and treasury.</span>
+        {signInButton}
       </div>
     );
   }
 
-  const forbidden = [episodes, lessons, treasury].find(
+  const denied = [episodes, lessons, treasury].find(
     (r) => r.error instanceof ApiClientError && (r.error.code === "FORBIDDEN" || r.error.code === "UNAUTHENTICATED"),
   );
-  if (forbidden) {
+  if (denied) {
+    const notOwner = denied.error instanceof ApiClientError && denied.error.code === "FORBIDDEN";
     return (
       <div className="flex flex-wrap items-center gap-3 rounded-md border border-dashed border-border px-4 py-3 text-[12px] text-muted">
-        <span>{forbidden.error instanceof Error ? forbidden.error.message : "Owner access required"}.</span>
-        {connectedIsOwner ? (
-          <Button variant="secondary" onClick={() => session.signIn().catch(() => undefined)}>
-            Sign in as owner
-          </Button>
-        ) : null}
+        <span>{notOwner ? "Only the agent owner can open the owner console. Signed in as a different wallet." : describeError(denied.error)}.</span>
+        {notOwner ? null : signInButton}
       </div>
     );
   }
@@ -83,10 +81,13 @@ export function OwnerSection({ agentId, ownerAddress, demo }: { agentId: string;
   const episodeList = episodes.data ?? [];
   return (
     <section className="flex flex-col gap-3" aria-label="Owner console">
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <h2 className="text-[13px] font-medium">Owner console</h2>
         <Badge tone="accent">Owner only</Badge>
         {demo ? <Badge tone="warn">Demo ?owner=1</Badge> : null}
+        <div className="ml-auto">
+          <StatusControl agentId={agentId} status={status} demo={demo} />
+        </div>
       </div>
 
       <div className="grid gap-3 xl:grid-cols-[1fr_340px]">
@@ -116,5 +117,37 @@ export function OwnerSection({ agentId, ownerAddress, demo }: { agentId: string;
         </div>
       </div>
     </section>
+  );
+}
+
+/** Pause or resume the agent. Stopped is terminal. The server enforces owner access and the same rule. */
+export function StatusControl({ agentId, status, demo }: { agentId: string; status: AgentStatus; demo: boolean }) {
+  const toast = useToast();
+  const router = useRouter();
+  const qc = useQueryClient();
+  const [busy, setBusy] = useState(false);
+
+  if (status === "stopped") return <Badge tone="neutral">Stopped</Badge>;
+  const next = status === "active" ? "paused" : "active";
+  const label = next === "paused" ? "Pause agent" : "Resume agent";
+
+  const toggle = async () => {
+    setBusy(true);
+    try {
+      await postJson(`/api/agents/${agentId}/status${demo ? "?owner=1" : ""}`, { status: next });
+      toast({ title: next === "paused" ? "Paused" : "Resumed", description: `The agent is now ${next}.`, tone: "success" });
+      await qc.invalidateQueries({ queryKey: ["my-agents"] });
+      router.refresh();
+    } catch (err) {
+      toast({ title: "Status change failed", description: describeError(err), tone: "error" });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Button variant="secondary" size="sm" disabled={busy} onClick={toggle}>
+      {busy ? "Saving…" : label}
+    </Button>
   );
 }

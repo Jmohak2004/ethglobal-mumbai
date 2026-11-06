@@ -94,3 +94,8 @@ export const txUrl = (hash: string): string => `${EXPLORER}/tx/${hash}`;
 export const addressUrl = (addr: string): string => `${EXPLORER}/address/${addr}`;
 export const zgTxUrl = (hash: string): string => `${ZG_EXPLORER}/tx/${hash}`;
 export const flashOrderUrl = (id: string): string => `${FLASH_ORDER_URL}${id}`;
+/**
+ * Definitive app, where Flash orders are cancelled. ARENA cannot build the signed cancel message yet
+ * (the Flash client takes it as an opaque string), so the cancel action links out instead of faking success.
+ */
+export const DEFINITIVE_APP_URL = "https://flash.definitive.fi";

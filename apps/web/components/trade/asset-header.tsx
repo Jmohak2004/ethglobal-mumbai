@@ -1,26 +1,11 @@
 "use client";
 
-import type { Candle, MarketSnapshot } from "@arena/shared";
-
+import type { MarketResponse } from "@/lib/types";
 import { Segmented } from "@/components/ui/segmented";
 import { Tooltip } from "@/components/ui/tooltip";
-import { fmtAmount, fmtCompactUsd, fmtPct, pnlClass, shortAddr } from "@/lib/format";
+import { fmtAmount, fmtPct, pnlClass, shortAddr } from "@/lib/format";
 
 const FEED_LABEL: Record<string, string> = { WETH: "ETH/USD", cbBTC: "BTC/USD" };
-
-/** Derives 24h stats from the 1h candles (last 24 bars). */
-export function dayStats(candles: Candle[]) {
-  const last = candles.slice(-24);
-  const first = candles[candles.length - 25] ?? candles[0];
-  const lastBar = candles[candles.length - 1];
-  if (!first || !lastBar || last.length === 0) return null;
-  return {
-    change: ((lastBar.c - first.c) / first.c) * 100,
-    high: Math.max(...last.map((c) => c.h)),
-    low: Math.min(...last.map((c) => c.l)),
-    volumeAsset: last.reduce((a, c) => a + c.v, 0),
-  };
-}
 
 export function AssetHeader({
   market,
@@ -29,13 +14,12 @@ export function AssetHeader({
   onAsset,
   activeAsset,
 }: {
-  market: MarketSnapshot;
+  market: MarketResponse;
   assets: string[];
   feedAddress: string | null;
   onAsset: (a: string) => void;
   activeAsset: string;
 }) {
-  const stats = dayStats(market.candles);
   const feedLabel = FEED_LABEL[market.asset] ?? "USD";
   return (
     <div className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-md border border-border bg-panel px-3 py-2">
@@ -46,13 +30,13 @@ export function AssetHeader({
       />
       <div className="num flex items-baseline gap-2">
         <span className="text-[18px] font-semibold">${fmtAmount(market.priceUsd, 2)}</span>
-        <span className="text-[11px] text-muted">mark</span>
+        <span className="text-[11px] text-muted">last</span>
       </div>
       <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-[11.5px]">
-        <Stat label="24h change" value={stats ? fmtPct(stats.change, 2, true) : "n/a"} className={stats ? pnlClass(stats.change) : undefined} />
-        <Stat label="24h high" value={stats ? fmtAmount(stats.high, 2) : "n/a"} />
-        <Stat label="24h low" value={stats ? fmtAmount(stats.low, 2) : "n/a"} />
-        <Stat label={`24h vol (${market.asset})`} value={stats ? fmtCompactUsd(stats.volumeAsset) : "n/a"} />
+        <Stat label="24h change" value={fmtPct(market.change24hPct, 2, true)} className={pnlClass(market.change24hPct)} />
+        <Stat label="24h high" value={fmtAmount(market.high24h, 2)} />
+        <Stat label="24h low" value={fmtAmount(market.low24h, 2)} />
+        <Stat label="24h volume" value={`${fmtAmount(market.volume24h, 2)} ${market.asset}`} />
       </div>
       <div className="ml-auto">
         <Tooltip
@@ -64,6 +48,7 @@ export function AssetHeader({
               <div className="text-muted">
                 Mark price reference. Stop and TP triggers are evaluated by Flash, not by this feed.
               </div>
+              <div className="text-muted">Last price and 24h stats: Coinbase Exchange, 5m candles, refreshed every 15 s.</div>
             </div>
           }
         >
