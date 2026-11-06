@@ -16,3 +16,4 @@ cre/**/node_modules/
 cre/**/*.wasm
 cre/**/.env
 *.log
+.telegram-state.json
