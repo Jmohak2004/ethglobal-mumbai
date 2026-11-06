@@ -37,7 +37,10 @@ export function createDb(opts: CreateDbOptions = {}): Db {
   const url = opts.url || process.env.DATABASE_URL;
   if (url) {
     // Idempotent migrations emit "already exists, skipping" notices on every startup; drop them.
-    return drizzlePostgres(postgres(url, { max: 10, onnotice: () => undefined }), { schema }) as unknown as Db;
+    // Pooled endpoints (Neon "-pooler", PgBouncer transaction mode) don't support prepared statements.
+    const pooled = url.includes("-pooler") || process.env.DB_POOLED === "true";
+    const max = Number(process.env.DB_POOL_MAX ?? 10);
+    return drizzlePostgres(postgres(url, { max, prepare: !pooled, onnotice: () => undefined }), { schema }) as unknown as Db;
   }
   const dir = opts.pgliteDir || process.env.PGLITE_DIR || DEFAULT_PGLITE_DIR;
   return drizzlePglite(new PGlite(dir), { schema }) as unknown as Db;
