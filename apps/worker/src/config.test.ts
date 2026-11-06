@@ -1,0 +1,90 @@
+import { describe, expect, test } from "bun:test";
+import { loadWorkerEnv } from "./env.ts";
+import { accountIndexFor, LocalWalletProvider, PrivyWalletProvider } from "./wallets.ts";
+import { createLogger } from "./logger.ts";
+import { english, generateMnemonic } from "viem/accounts";
+
+// Generated per run, so no mnemonic is kept in the repository.
+const TEST_MNEMONIC = generateMnemonic(english);
+
+describe("loadWorkerEnv", () => {
+  test("defaults keep the worker in paper mode on Base Sepolia", () => {
+    const env = loadWorkerEnv({});
+    expect(env.EXECUTION_MODE).toBe("paper");
+    expect(env.CHAIN).toBe("baseSepolia");
+    expect(env.WORKER_MAX_CONCURRENCY).toBe(3);
+    expect(env.AGENT_SEED_CREDIT_0G).toBe(1);
+    expect(env.RELAYER_MAX_REQUEST_USD).toBe(2);
+  });
+
+  test("blank values are treated as unset", () => {
+    const env = loadWorkerEnv({ TREASURY_ADDRESS: "  ", ZG_ROUTER_URL: "", OPERATOR_PRIVATE_KEY: "" });
+    expect(env.TREASURY_ADDRESS).toBeUndefined();
+    expect(env.ZG_ROUTER_URL).toBeUndefined();
+    expect(env.OPERATOR_PRIVATE_KEY).toBeUndefined();
+  });
+
+  test("malformed addresses and keys fail at startup", () => {
+    expect(() => loadWorkerEnv({ TREASURY_ADDRESS: "0x1234" })).toThrow();
+    expect(() => loadWorkerEnv({ RELAYER_ZG_PRIVATE_KEY: "0xabc" })).toThrow();
+    expect(() => loadWorkerEnv({ CHAIN: "mainnet" })).toThrow();
+  });
+});
+
+describe("wallets", () => {
+  test("a mnemonic gives each agent a stable, distinct account", async () => {
+    const wallets = new LocalWalletProvider({ mnemonic: TEST_MNEMONIC });
+    const a1 = await wallets.addressFor({ id: "agent-a" });
+    const a2 = await wallets.addressFor({ id: "agent-a" });
+    const b = await wallets.addressFor({ id: "agent-b" });
+    expect(a1).toBe(a2);
+    expect(a1).not.toBe(b);
+    const signer = await wallets.signerFor({ id: "agent-a" });
+    expect(signer.address).toBe(a1);
+  });
+
+  test("the account index is stable and within the non-hardened range", () => {
+    expect(accountIndexFor("agent-a")).toBe(accountIndexFor("agent-a"));
+    expect(accountIndexFor("agent-a")).toBeLessThan(2 ** 31);
+  });
+
+  test("a bad mnemonic is rejected at construction", () => {
+    expect(() => new LocalWalletProvider({ mnemonic: "not a real mnemonic phrase" })).toThrow();
+  });
+
+  test("with no key material, construction fails", () => {
+    expect(() => new LocalWalletProvider({})).toThrow("DEV_AGENT_MNEMONIC");
+  });
+
+  test("the Privy stub refuses to sign until it is configured", async () => {
+    const privy = new PrivyWalletProvider();
+    await expect(privy.signerFor()).rejects.toThrow("not configured");
+    await expect(privy.addressFor()).rejects.toThrow("not configured");
+  });
+});
+
+describe("logger", () => {
+  test("writes one JSON line per event with agent and request ids, and redacts secret-looking keys", () => {
+    const lines: string[] = [];
+    const log = createLogger({ write: (line) => lines.push(line), now: () => 0 }).child({ agent: "ag-1", req: "rq-1" });
+    log.info("tick decided", { verdict: "approve", apiKey: "sk-secret", mgmtKey: "mk-x", privateKey: "0xabc" });
+    expect(lines).toHaveLength(1);
+    const parsed = JSON.parse(lines[0] ?? "{}") as Record<string, unknown>;
+    expect(parsed.msg).toBe("tick decided");
+    expect(parsed.agent).toBe("ag-1");
+    expect(parsed.req).toBe("rq-1");
+    expect(parsed.verdict).toBe("approve");
+    expect(parsed.apiKey).toBe("[redacted]");
+    expect(parsed.mgmtKey).toBe("[redacted]");
+    expect(parsed.privateKey).toBe("[redacted]");
+    expect(lines[0]).not.toContain("sk-secret");
+  });
+
+  test("levels below the minimum are dropped", () => {
+    const lines: string[] = [];
+    const log = createLogger({ minLevel: "warn", write: (line) => lines.push(line) });
+    log.info("quiet");
+    log.warn("loud");
+    expect(lines).toHaveLength(1);
+  });
+});

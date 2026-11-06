@@ -17,3 +17,4 @@ cre/**/*.wasm
 cre/**/.env
 *.log
 .telegram-state.json
+.relayer-cursor.json

@@ -3,7 +3,15 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "scripts": { "dev": "bun --watch src/index.ts", "start": "bun src/index.ts", "typecheck": "tsc -p .", "test": "bun test" },
+  "scripts": {
+    "dev": "bun --env-file=../../.env --watch src/index.ts run",
+    "start": "bun --env-file=../../.env src/index.ts run",
+    "typecheck": "tsc -p .",
+    "test": "bun test",
+    "relayer": "bun --env-file=../../.env src/index.ts relayer",
+    "tick": "bun --env-file=../../.env src/index.ts tick",
+    "seed-demo": "bun --env-file=../../.env src/index.ts seed-demo"
+  },
   "dependencies": {
     "@arena/db": "workspace:*",
     "@arena/flash": "workspace:*",
