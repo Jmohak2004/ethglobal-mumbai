@@ -1,7 +1,8 @@
 #!/usr/bin/env bun
 // Worker CLI.
 //   bun src/index.ts run                 migrate, then scheduler, provisioning, forecast resolver, crash guard, stats/attestation sync,
-//                                        treasury, insight digests (15 min), humans board sync (5 min), reflection loops
+//                                        treasury, insight digests (15 min), humans board sync (5 min), reflection loops,
+//                                        runtime status, run-now requests (3 s), paper TP/SL and self-funding (30 s)
 //   bun src/index.ts relayer             poll TopUpRequested and deposit 0G through the Payment Layer
 //   bun src/index.ts tick <agentId>      one decision tick; prints the episode JSON
 //   bun src/index.ts insights <agentId>  one insight cycle for one agent; prints the run and its digest
@@ -11,8 +12,12 @@
 import { getAgent, migrate } from "@arena/db";
 import { loadWorkerEnv, type WorkerEnv } from "./env.ts";
 import { createRuntime, loadAgents, type Runtime } from "./runtime.ts";
-import { Scheduler } from "./scheduler.ts";
+import { Scheduler, withDemoTickInterval } from "./scheduler.ts";
 import { runTick, type TickResult } from "./tick.ts";
+import { modeFor } from "./execution.ts";
+import { closePaperBrackets, DEFAULT_ZG_PER_USDC, settlePaperCommission, settlePaperTopUp } from "./paper.ts";
+import { recordNextTick, recordPortfolio, recordTickStatus, type StatusDeps } from "./runtime-status.ts";
+import { handleRunNow } from "./run-now.ts";
 import { resolveDueForecasts } from "./forecasts.ts";
 import { createCrashGuard } from "./crash.ts";
 import { dbBlockCursor, recomputeStats, syncAttestations, syncOrderFills } from "./stats.ts";
@@ -23,11 +28,15 @@ import { seedDemoAgents } from "./seed.ts";
 import { provisionAgent, provisionPass } from "./provisioner.ts";
 import { syncHumans } from "./humans.ts";
 import { INSIGHT_CYCLE_MS } from "./insights/producer.ts";
-import type { Agent } from "@arena/shared";
+import type { Agent, BudgetTier } from "@arena/shared";
 
 const FORECAST_EVERY_MS = 60_000;
 const PROVISION_EVERY_MS = 30_000;
 const RISK_CHECK_EVERY_MS = 30_000;
+const PAPER_MONITOR_EVERY_MS = 30_000;
+const RUN_NOW_EVERY_MS = 3_000;
+/** Paused agents stay in the TP/SL monitor: their open brackets still protect positions. */
+const PAPER_MONITOR_STATUSES: Agent["status"][] = ["active", "paused"];
 const ATTEST_EVERY_MS = 15 * 60_000;
 const TREASURY_EVERY_MS = 15 * 60_000;
 const REFLECT_CHECK_EVERY_MS = 10 * 60_000;
@@ -42,11 +51,56 @@ const USAGE = `usage: bun src/index.ts <command>
   provision <agentId> run every provisioning step for one agent now and print the result
   seed-demo           create two paper demo agents when the database is empty`;
 
-/** Shared work after each tick: reflect after a sell, and request a top-up when the budget is low. */
+/** Paper agents are the ones the platform simulates. modeFor is the same rule the tick uses to pick the execution mode. */
+export const isPaperAgent = (deps: Pick<Runtime["deps"], "executionMode">, agent: Agent): boolean => modeFor(deps, agent) === "paper";
+
+const statusDepsOf = (rt: Runtime): StatusDeps => ({ db: rt.db, clock: rt.clock, logger: rt.logger, market: rt.deps.market });
+
+/**
+ * Shared work after each tick: runtime status (every mode), reflect after a sell, then the mode's self-funding.
+ * Paper agents use the simulated commission and top-up ledger. Live agents use the onchain treasury.
+ */
 export async function afterTick(rt: Runtime, agent: Agent, result: TickResult): Promise<void> {
   const tier = result.budgetTier ?? "healthy";
+  try {
+    await recordTickStatus(statusDepsOf(rt), agent, result);
+  } catch (err) {
+    rt.logger.error("runtime status write failed", { agent: agent.id, error: err });
+  }
   if (result.sold) await reflectAgent(rt.reflectionDeps(), agent, tier);
-  await rt.treasury.maybeTopUp(agent, tier);
+  if (isPaperAgent(rt.deps, agent)) {
+    await rt.agentLock.run(agent.id, () => settlePaperSelfFunding(rt, agent, tier));
+  } else {
+    await rt.treasury.maybeTopUp(agent, tier);
+  }
+}
+
+/** Paper PRD 6.11 loop: commission on the high-water mark, then a simulated 0G top-up if the budget tier calls for it. */
+async function settlePaperSelfFunding(rt: Runtime, agent: Agent, tier: BudgetTier): Promise<void> {
+  const deps = { db: rt.db, clock: rt.clock, logger: rt.logger };
+  await settlePaperCommission(deps, agent);
+  await settlePaperTopUp(deps, agent, tier, {
+    minUsd: rt.env.PAPER_MIN_TOPUP_USD,
+    zgPerUsdc: rt.env.ZG_PER_USDC ?? DEFAULT_ZG_PER_USDC,
+  });
+}
+
+/** One tick under the agent's lock. Never throws: an unexpected failure becomes an error result. */
+function runAgent(rt: Runtime, agent: Agent): Promise<TickResult> {
+  return rt.agentLock.run(agent.id, () => runTick(rt.deps, agent)).catch((err: unknown) => {
+    rt.logger.error("tick failed", { agent: agent.id, error: err });
+    return {
+      agentId: agent.id,
+      requestId: "",
+      episode: null,
+      skipped: null,
+      orderId: null,
+      mode: null,
+      budgetTier: null,
+      sold: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  });
 }
 
 /** Once a day per agent, reflect on the agent's recent episodes. The last run time is read from the lessons table. */
@@ -73,16 +127,69 @@ async function cmdRun(env: WorkerEnv): Promise<void> {
   const { db, clock } = rt;
   const market = rt.deps.market;
 
+  if (env.DEMO_TICK_INTERVAL_SEC) {
+    log.warn("demo tick interval: paper agents tick on a fixed interval", { seconds: env.DEMO_TICK_INTERVAL_SEC });
+  }
   const scheduler = new Scheduler({
     deps: rt.deps,
-    loadAgents: () => loadAgents(db),
+    loadAgents: async () =>
+      (await loadAgents(db)).map((a) => withDemoTickInterval(a, env.DEMO_TICK_INTERVAL_SEC, isPaperAgent(rt.deps, a))),
     maxConcurrency: env.WORKER_MAX_CONCURRENCY,
     logger: log,
+    runner: (_deps, agent) => runAgent(rt, agent),
     onTick: async (agent, result) => {
       await afterTick(rt, agent, result);
     },
+    onScheduled: (agent, nextRunAt) => recordNextTick({ db, clock }, agent.id, nextRunAt),
   });
   await scheduler.start();
+
+  // Paper TP/SL (PRD 6.5): a bracket entry whose mark crossed its take-profit or stop-loss is closed at the mark.
+  let paperMonitorRunning = false;
+  const paperMonitor = async () => {
+    if (paperMonitorRunning) return;
+    paperMonitorRunning = true;
+    try {
+      for (const agent of await loadAgents(db, PAPER_MONITOR_STATUSES)) {
+        if (!isPaperAgent(rt.deps, agent)) continue;
+        await rt.agentLock
+          .run(agent.id, async () => {
+            const exits = await closePaperBrackets(rt.deps, agent);
+            if (exits.length === 0) return;
+            await settlePaperCommission({ db, clock, logger: log }, agent);
+            await recordPortfolio(statusDepsOf(rt), agent);
+          })
+          .catch((err) => log.error("paper TP/SL check failed", { agent: agent.id, error: err }));
+      }
+    } finally {
+      paperMonitorRunning = false;
+    }
+  };
+
+  // Run now (owner console): claimed requests tick their agents on the scheduler, or directly when it does not hold them.
+  let runNowRunning = false;
+  const runNow = async () => {
+    if (runNowRunning) return;
+    runNowRunning = true;
+    try {
+      await handleRunNow({
+        db,
+        clock,
+        logger: log,
+        scheduler,
+        runDirect: async (agentId) => {
+          const agent = await getAgent(db, agentId);
+          if (!agent) {
+            log.warn("run-now: no such agent", { agent: agentId });
+            return;
+          }
+          await afterTick(rt, agent, await runAgent(rt, agent));
+        },
+      });
+    } finally {
+      runNowRunning = false;
+    }
+  };
 
   const attest = async () => {
     await recomputeStats({ db, clock, logger: log });
@@ -153,6 +260,8 @@ async function cmdRun(env: WorkerEnv): Promise<void> {
     setInterval(() => void dailyReflections(rt, reflectLastRun).catch((e) => log.error("daily reflection failed", { error: e })), REFLECT_CHECK_EVERY_MS),
     setInterval(() => void insightCycle().catch((e) => log.error("insight cycle failed", { error: e })), INSIGHT_CYCLE_MS),
     setInterval(() => void humans().catch((e) => log.error("humans board sync failed", { error: e })), HUMANS_EVERY_MS),
+    setInterval(() => void paperMonitor().catch((e) => log.error("paper TP/SL monitor failed", { error: e })), PAPER_MONITOR_EVERY_MS),
+    setInterval(() => void runNow().catch((e) => log.error("run-now poll failed", { error: e })), RUN_NOW_EVERY_MS),
   ];
   // Kick the slow loops off once at startup.
   void provision().catch((e) => log.error("provisioning pass failed", { error: e }));
@@ -178,9 +287,10 @@ async function cmdRun(env: WorkerEnv): Promise<void> {
   process.once("SIGTERM", () => void shutdown("SIGTERM"));
 }
 
-/** Collects owed commission for every active agent. Failures are logged per agent. */
+/** Collects owed commission for every active live agent. Paper agents settle on their simulated ledger instead. */
 async function treasurySweep(rt: Runtime): Promise<void> {
   for (const agent of await loadAgents(rt.db)) {
+    if (isPaperAgent(rt.deps, agent)) continue;
     try {
       await rt.treasury.collectCommissionIfOwed(agent);
     } catch (err) {

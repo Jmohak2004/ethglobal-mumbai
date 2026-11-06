@@ -1,8 +1,10 @@
 // Per-agent compute budget tier (PRD 6.11.6). With a 0G management key, the balance is the account's
 // total balance. Without one, it is an estimate: AGENT_SEED_CREDIT_0G minus everything billed so far.
+// Paper agents always use the estimate, plus the 0G that their simulated top-ups bought (paper_ledger).
+// The management-key balance is shared by the whole platform, so it cannot reflect one paper agent's top-ups.
 // Units: 0G. Billing strings from the Router are assumed to be 0G, not neuron (see report).
 
-import { sumBillingSince, type Db } from "@arena/db";
+import { paperLedgerTotals, sumBillingSince, type Db } from "@arena/db";
 import type { Agent } from "@arena/shared";
 import { budgetTierFrom, type ZeroGAccount } from "@arena/zerog";
 import type { BudgetReading, BudgetSource, Clock } from "./deps.ts";
@@ -17,6 +19,8 @@ export interface BudgetSourceOptions {
   clock: Clock;
   seedCredit0G: number;
   account?: Pick<ZeroGAccount, "getBalance"> | null;
+  /** True for agents that trade on paper. Their balance includes simulated top-ups and never reads the account. */
+  isPaper?: (agent: Agent) => boolean;
   logger?: Logger;
 }
 
@@ -38,9 +42,10 @@ export function createBudgetSource(opts: BudgetSourceOptions): BudgetSource {
         return { tier: "critical", balance: null, dailyBurn, source: "override" };
       }
 
+      const paper = opts.isPaper?.(agent) ?? false;
       let balance: number | null = null;
       let source: BudgetReading["source"] = "estimate";
-      if (opts.account) {
+      if (opts.account && !paper) {
         try {
           const account = await opts.account.getBalance();
           const total = Number(account.totalBalance);
@@ -52,7 +57,8 @@ export function createBudgetSource(opts: BudgetSourceOptions): BudgetSource {
         }
       }
       if (balance === null) {
-        balance = Math.max(0, opts.seedCredit0G - (Number(billedTotal) || 0));
+        const topup0g = paper ? (await paperLedgerTotals(opts.db, agent.id)).topup0g : 0;
+        balance = Math.max(0, opts.seedCredit0G + topup0g - (Number(billedTotal) || 0));
       }
 
       return { tier: budgetTierFrom({ balance, dailyBurn }), balance, dailyBurn, source };

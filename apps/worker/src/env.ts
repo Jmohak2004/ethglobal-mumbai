@@ -41,8 +41,21 @@ export const WorkerEnvSchema = EnvSchema.extend({
   ZG_STORAGE_INDEXER: z.string().optional(),
   /** Signer for 0G Storage uploads. */
   ZG_PRIVATE_KEY: privateKey.optional(),
-  /** 0G per USDC, used when CoinGecko has no price for 0G. */
+  /**
+   * 0G per USDC. The relayer uses it when CoinGecko has no price. Paper top-ups use it too (fallback 6 when unset).
+   * Paper top-ups are simulated, so this only sets the 0G credit a paper agent receives.
+   */
   ZG_PER_USDC: z.coerce.number().positive().optional(),
+  /**
+   * Paper mode only: the smallest simulated ledger balance (USD of paper commission) that buys a 0G top-up
+   * once the agent's budget tier is low, critical or empty (PRD 6.11, simulated). Default 0.01.
+   */
+  PAPER_MIN_TOPUP_USD: num(0.01),
+  /**
+   * Demo speed. When set, every paper agent ticks on this interval (seconds) instead of its own tickIntervalSec,
+   * e.g. 60 so a demo does not wait five minutes. Live agents are not affected. The scheduler's 30 s floor still applies.
+   */
+  DEMO_TICK_INTERVAL_SEC: z.coerce.number().int().positive().optional(),
   /** Assumed 0G credit per agent when no management key is set (estimate = seed − billed). */
   AGENT_SEED_CREDIT_0G: num(1),
   /** Comma list of curated RSS/Atom feeds for insight sources. Unset uses the built-in defaults (PRD 6.8). */

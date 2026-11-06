@@ -1,6 +1,6 @@
 // Shared fakes for the worker tests. No network, no real keys (keys are generated per run), no real orders.
 
-import { createAgent, createDb, migrate, type Db } from "@arena/db";
+import { createAgent, createDb, insertFills, migrate, upsertOrder, type Db, type OrderRecord } from "@arena/db";
 import type { ExecutionResult, OrderControl, OrderSigner, QuoteResponse } from "@arena/flash";
 import { computeIndicators, configHash, defaultConfig } from "@arena/policy";
 import {
@@ -280,6 +280,56 @@ export async function seedAgent(db: Db, opts: AgentOptions = {}): Promise<Agent>
     status: opts.status ?? "active",
     createdAt: NOW - 3 * 24 * 60 * 60 * 1000,
   });
+}
+
+export interface PaperFillSpec {
+  id: string;
+  side: "buy" | "sell";
+  qty: number;
+  price: number;
+  ts: number;
+  asset?: string;
+  feeUsd?: number;
+  /** Entry bracket, stored on the order the way execution.ts stores it. */
+  bracket?: { takeProfitPrice: number; stopLossPrice: number };
+  /** Set on TP/SL exits: the bracket order this sell closes. */
+  closesOrderId?: string;
+}
+
+/** Inserts a paper order and its simulated fill, shaped like execution.ts orderRows() for a paper fill. */
+export async function seedPaperFill(db: Db, agent: Agent, spec: PaperFillSpec): Promise<void> {
+  const notionalUsd = spec.qty * spec.price;
+  const record: OrderRecord = {
+    id: spec.id,
+    agentId: agent.id,
+    funderAddress: agent.tradingWallet,
+    side: spec.side,
+    asset: spec.asset ?? "WETH",
+    orderType: "market",
+    notionalUsd,
+    status: "simulated_fill",
+    raw: {
+      paper: true,
+      attachedBracket: spec.bracket ?? null,
+      ...(spec.closesOrderId ? { closesOrderId: spec.closesOrderId, exit: true } : {}),
+    },
+    createdAt: spec.ts,
+    updatedAt: spec.ts,
+  };
+  await upsertOrder(db, record);
+  await insertFills(db, [
+    {
+      id: `${spec.id}:fill`,
+      orderId: spec.id,
+      price: spec.price,
+      qty: spec.qty,
+      notionalUsd,
+      feeUsd: spec.feeUsd ?? 0,
+      integratorFeeUsd: 0,
+      txId: null,
+      ts: spec.ts,
+    },
+  ]);
 }
 
 /** A wallet provider whose keys are generated for this process only. */

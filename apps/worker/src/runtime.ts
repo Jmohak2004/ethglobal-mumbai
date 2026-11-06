@@ -10,6 +10,8 @@ import type { Hex } from "viem";
 import { caip2For, chainConfigFor, publicClientFor, type ChainConfig } from "./chain.ts";
 import type { WorkerEnv } from "./env.ts";
 import { createBudgetSource } from "./budget.ts";
+import { AgentLock } from "./agent-lock.ts";
+import { modeFor } from "./execution.ts";
 import { createMarketData, chainlinkFeedReader } from "./market.ts";
 import { createRiskSource, riskOracleReader } from "./risk.ts";
 import { createLogger, type Logger } from "./logger.ts";
@@ -44,6 +46,8 @@ export interface Runtime {
   flash: FlashClient | null;
   /** Insight digests (PRD 6.8): the 15-min cycle, and the refresh a tick calls when a digest is stale. */
   insights: InsightProducer;
+  /** One lock per agent. Ticks, paper TP/SL exits and paper ledger writes all run under it. */
+  agentLock: AgentLock;
   reflectionDeps(): ReflectionDeps;
   relayerOptions(): RelayerOptions;
   /** Dependencies for provisioning (wallets, 0G keys, registry, allowance). */
@@ -124,7 +128,14 @@ export function createRuntime(env: WorkerEnv, overrides: RuntimeOverrides = {}):
   });
 
   const zgAccount = env.ZG_MGMT_KEY ? new ZeroGAccount({ mgmtKey: env.ZG_MGMT_KEY, baseUrl: zgBaseUrl }) : null;
-  const budget = createBudgetSource({ db, clock, seedCredit0G: env.AGENT_SEED_CREDIT_0G, account: zgAccount, logger });
+  const budget = createBudgetSource({
+    db,
+    clock,
+    seedCredit0G: env.AGENT_SEED_CREDIT_0G,
+    account: zgAccount,
+    isPaper: (agent) => modeFor({ executionMode: env.EXECUTION_MODE }, agent) === "paper",
+    logger,
+  });
 
   const wallets: WalletProvider = walletProviderFor(env, { db, chain });
 
@@ -199,6 +210,7 @@ export function createRuntime(env: WorkerEnv, overrides: RuntimeOverrides = {}):
 
   const rss = new RssCollector({ feeds: parseFeedList(env.INSIGHT_RSS_FEEDS), clock, logger });
   const insights = createInsightProducer({ db, clock, logger, budget, agentRouterFor, rss });
+  const agentLock = new AgentLock();
 
   const deps: Deps = {
     db,
@@ -230,6 +242,7 @@ export function createRuntime(env: WorkerEnv, overrides: RuntimeOverrides = {}):
     registry,
     flash,
     insights,
+    agentLock,
 
     provisionDeps: () => ({
       db,
