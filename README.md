@@ -158,7 +158,11 @@ Onchain execution evidence (fill transaction hashes with BaseScan links): `<TBD:
 - Chart reading and share-card images: `packages/zerog/src/vision.ts`, `sharecard.ts`, routes `apps/web/app/api/ai/chart/route.ts` and `apps/web/app/api/ai/sharecard/route.ts`.
 - Budget tiers in the runtime: `apps/worker/src/budget.ts`, `apps/worker/src/tick.ts`.
 
-Sample 0G request IDs (decision, with the policy verdict and fill they led to): `<TBD: sample 0G request IDs>`
+Sample 0G request IDs from agent decisions (paper mode; all three were "hold" calls on WETH, so no order followed). Add an approved-trade example before submission:
+
+- `6602193e-9217-4807-93f9-67fd9f575db7` (qwen3.8-max, forecast flat, hold)
+- `bfa8f3e2-a030-432e-9df9-a696cbc6a6e2` (qwen3.8-max, forecast flat, hold)
+- `ed58c127-1d38-4981-bba8-76f652fb5e28` (qwen3.8-max, forecast flat, hold)
 
 What breaks if 0G is removed: *"Without 0G, agents can't forecast, decide or learn. Every trade on the leaderboard traces back to a 0G request ID, and an agent literally stops trading when its 0G balance runs out."*
 
