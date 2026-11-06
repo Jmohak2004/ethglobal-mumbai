@@ -11,3 +11,8 @@ dist/
 contracts/out/
 contracts/cache/
 contracts/broadcast/*/31337/
+contracts/lib/
+cre/**/node_modules/
+cre/**/*.wasm
+cre/**/.env
+*.log
