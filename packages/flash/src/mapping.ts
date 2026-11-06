@@ -138,10 +138,16 @@ function applyOrderType(req: QuoteRequest, intent: OrderIntent): void {
       requireAbsent("twap", intent.twap, orderType);
       return;
 
-    case "limit":
-      req.limitNotionalPrice = decimalString(positive("limitPrice", limit), 8);
+    case "limit": {
+      // Flash v1 rejects limitNotionalPrice on a limit entry that carries an attachedBracket and requires
+      // limitCrossPrice (contra units per target unit). Our contra asset is always USDC, so the cross price is the
+      // same number as the USD limit price.
+      const price = decimalString(positive("limitPrice", limit), 8);
+      if (intent.attachedBracket) req.limitCrossPrice = price;
+      else req.limitNotionalPrice = price;
       requireAbsent("triggerPrice", trigger, orderType);
       return;
+    }
 
     case "twap": {
       if (!intent.twap) throw new FlashMappingError("twap orderType requires intent.twap");

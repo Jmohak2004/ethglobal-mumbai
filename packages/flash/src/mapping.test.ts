@@ -186,7 +186,9 @@ describe("intentToQuoteRequest: attached TP/SL on entries", () => {
       }),
       opts,
     );
-    expect(req.limitNotionalPrice).toBe("3000");
+    // Verified against the live API: a limit entry with an attached bracket must use limitCrossPrice.
+    expect(req.limitCrossPrice).toBe("3000");
+    expect(req.limitNotionalPrice).toBeUndefined();
     expect(req.attachedBracket).toEqual({
       takeProfit: { notionalPrice: "3600" },
       stopLoss: { notionalPrice: "2700" },
@@ -310,5 +312,24 @@ describe("buildOrderRequest", () => {
 
   it("refuses a quote without evm typed data", () => {
     expect(() => buildOrderRequest(baseReq, quoteFixture({ evm: null }), { userSignature: "0xaa" })).toThrow(/evm.orderTypedData/);
+  });
+});
+
+describe("limit entries with an attached bracket", () => {
+  it("use limitCrossPrice (Flash v1 rejects limitNotionalPrice with a bracket)", () => {
+    const req = intentToQuoteRequest(
+      {
+        side: "buy",
+        asset: "WETH",
+        quoteAsset: "USDC",
+        orderType: "limit",
+        notionalUsd: 1,
+        limitPrice: 2000,
+        attachedBracket: { takeProfitPrice: 2600, stopLossPrice: 1900 },
+      },
+      { chain: "base", funderAddress: "0x000000000000000000000000000000000000dEaD", integratorFeeBps: 10 },
+    );
+    expect(req.limitCrossPrice).toBe("2000");
+    expect(req.limitNotionalPrice).toBeUndefined();
   });
 });
