@@ -223,3 +223,48 @@ describe("ZeroGRouter.image", () => {
     );
   });
 });
+
+describe("trust mode fallback", () => {
+  test("retries in standard mode when no provider serves the requested trust mode", async () => {
+    const calls: { mode: string | null; body: Record<string, unknown> }[] = [];
+    const fetchFn = (async (_url: string | URL | Request, init?: RequestInit) => {
+      const headers = new Headers(init?.headers);
+      const body = JSON.parse(String(init?.body ?? "{}"));
+      calls.push({ mode: headers.get("X-0G-Provider-Trust-Mode"), body });
+      if (calls.length === 1) {
+        return new Response(JSON.stringify({ error: { code: "no_provider_for_trust_mode", message: "no provider" } }), { status: 503 });
+      }
+      return new Response(
+        JSON.stringify({ choices: [{ message: { content: "ok" } }], x_0g_trace: { request_id: "req-1", tee_verified: true } }),
+        { status: 200 },
+      );
+    }) as typeof fetch;
+    const router = new ZeroGRouter({ apiKey: "sk-test", payer: "agent", fetch: fetchFn });
+    const out = await router.chat({ model: "m", messages: [{ role: "user", content: "hi" }] });
+    expect(calls.map((c) => c.mode)).toEqual(["verified", "standard"]);
+    expect(calls[1]?.body.verify_tee).toBeUndefined();
+    expect(out.trace.requestId).toBe("req-1");
+    expect(out.trace.teeVerified).toBe(false);
+  });
+});
+
+describe("billing units", () => {
+  const run = async (billing: unknown) => {
+    const fetchFn = (async () =>
+      new Response(JSON.stringify({ choices: [{ message: { content: "ok" } }], x_0g_trace: { request_id: "r", billing } }), {
+        status: 200,
+      })) as unknown as typeof fetch;
+    const router = new ZeroGRouter({ apiKey: "sk-test", payer: "agent", fetch: fetchFn });
+    return (await router.chat({ model: "m", messages: [{ role: "user", content: "hi" }] })).trace;
+  };
+  test("USD-mode accounts report micro-USD", async () => {
+    const t = await run({ currency: "usd", total_cost: "8130", total_cost_usd_micro: "8130" });
+    expect(t.billing).toBe("8130");
+    expect(t.billingUnit).toBe("usd_micro");
+  });
+  test("0G-mode accounts report neuron", async () => {
+    const t = await run({ total_cost: "1935800000000000" });
+    expect(t.billing).toBe("1935800000000000");
+    expect(t.billingUnit).toBe("neuron");
+  });
+});

@@ -5,6 +5,7 @@
 // Agents with a low, critical or empty budget tier are skipped (PRD 6.11.6). The digest uses the agent's own 0G
 // key when it has one (payer "agent"), and the platform key otherwise.
 
+import { normalizeTrace } from "../billing.ts";
 import {
   insertInference,
   insertInsightDigest,
@@ -163,7 +164,7 @@ export function createInsightProducer(opts: InsightProducerOptions): InsightProd
 
       const traces = res.traces.length > 0 ? res.traces : [res.trace];
       for (const trace of traces) {
-        await insertInference(db, trace, { agentId: agent.id, purpose: "digest", ts: now });
+        await insertInference(db, normalizeTrace(trace), { agentId: agent.id, purpose: "digest", ts: now });
       }
       if (res.error) {
         log.warn("insight digest rejected", { error: res.error, zgRequestId: res.trace.requestId });

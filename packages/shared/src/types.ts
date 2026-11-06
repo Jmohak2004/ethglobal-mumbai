@@ -205,8 +205,13 @@ export interface InferenceTrace {
   requestId: string;
   model: string;
   provider: string | null;
-  /** Billing in neuron/0G as reported by x_0g_trace, kept as string to avoid precision loss. */
+  /**
+   * Cost of the call as a decimal string. Raw from x_0g_trace in the unit given by billingUnit; the worker
+   * normalizes it to 0G (billingUnit "0g") before storing so budgets can sum it.
+   */
   billing: string | null;
+  /** "usd_micro" for USD-mode accounts, "neuron" (1e-18 0G) for 0G-mode accounts, "0g" once normalized. */
+  billingUnit?: "usd_micro" | "neuron" | "0g" | null;
   teeVerified: boolean | null;
   latencyMs: number;
   payer: "agent" | "user" | "platform";

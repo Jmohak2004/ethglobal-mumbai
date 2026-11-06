@@ -4,6 +4,7 @@
 // owner's ±maxDeltaPct window and the template bounds, after the config is re-validated. Each change is a
 // new config version. Hard limits are never touched.
 
+import { normalizeTrace } from "./billing.ts";
 import {
   insertInference,
   insertLesson,
@@ -122,7 +123,7 @@ async function recordReflectionCalls(
   const traces = res.traces.length > 0 ? res.traces : [res.trace];
   for (const trace of traces) {
     try {
-      await insertInference(db, trace, { agentId, purpose: "reflection", ts });
+      await insertInference(db, normalizeTrace(trace), { agentId, purpose: "reflection", ts });
     } catch (err) {
       log.error("could not record reflection inference", { error: err, zgRequestId: trace.requestId });
     }

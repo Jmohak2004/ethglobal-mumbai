@@ -56,3 +56,20 @@ export function globalLimitsFromEnv(env: Env): GlobalLimits {
     killSwitch: env.GLOBAL_KILL_SWITCH,
   };
 }
+
+/**
+ * Converts a 0G Router cost into 0G. USD-mode accounts bill in micro-USD (converted at zgPerUsd, ~0G per USDC);
+ * 0G-mode accounts bill in neuron (1e-18 0G). Unknown units are returned unchanged. Returns null if unparseable.
+ */
+export function billingTo0G(
+  billing: string | null,
+  unit: "usd_micro" | "neuron" | "0g" | null | undefined,
+  zgPerUsd: number,
+): string | null {
+  if (billing === null) return null;
+  const v = Number(billing);
+  if (!Number.isFinite(v)) return null;
+  if (unit === "usd_micro") return String((v / 1_000_000) * zgPerUsd);
+  if (unit === "neuron") return String(v / 1e18);
+  return billing;
+}

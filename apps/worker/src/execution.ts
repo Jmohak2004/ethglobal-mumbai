@@ -1,6 +1,7 @@
 // Order placement and ledger writes shared by the decision tick and the crash guard. Nothing here decides
 // what to trade: callers pass a policy-approved OrderIntent. Paper orders never sign.
 
+import { normalizeTrace } from "./billing.ts";
 import {
   insertEpisode,
   insertForecast,
@@ -186,7 +187,7 @@ export interface Persistence {
 export async function persistTick(db: Db, episode: Episode, extra: Persistence): Promise<void> {
   await insertEpisode(db, episode);
   for (const trace of extra.traces) {
-    await insertInference(db, trace, { agentId: episode.agentId, purpose: "decision", ts: episode.ts });
+    await insertInference(db, normalizeTrace(trace), { agentId: episode.agentId, purpose: "decision", ts: episode.ts });
   }
   if (extra.forecast) {
     await insertForecast(db, { ...extra.forecast, episodeId: episode.id });
