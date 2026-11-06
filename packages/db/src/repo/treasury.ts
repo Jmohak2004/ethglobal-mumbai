@@ -1,4 +1,4 @@
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import type { Db } from "../client.ts";
 import { topups, treasuryEvents } from "../schema.ts";
 import { clampLimit, newId } from "./util.ts";
@@ -6,6 +6,8 @@ import { clampLimit, newId } from "./util.ts";
 export interface TopupRecord {
   id: string;
   agentId: string;
+  /** TopUpRequested nonce as decimal text. Null for top-ups recorded before the nonce is known. */
+  nonce: string | null;
   usdcAmount: number;
   baseTx: string | null;
   zgTransferTx: string | null;
@@ -13,6 +15,7 @@ export interface TopupRecord {
   firstPaidRequestId: string | null;
   status: string;
   ts: number;
+  updatedAt: number;
 }
 
 export interface TopupPatch {
@@ -21,6 +24,20 @@ export interface TopupPatch {
   zgTransferTx?: string | null;
   depositTx?: string | null;
   firstPaidRequestId?: string | null;
+}
+
+export interface CreateTopupInput {
+  id?: string;
+  agentId: string;
+  /** The TopUpRequested nonce. Unique per agent when set, which makes creation idempotent. */
+  nonce?: bigint | number | string | null;
+  usdcAmount: number;
+  baseTx?: string | null;
+  zgTransferTx?: string | null;
+  depositTx?: string | null;
+  firstPaidRequestId?: string | null;
+  status?: string;
+  ts?: number;
 }
 
 export interface TreasuryEventRecord {
@@ -33,26 +50,89 @@ export interface TreasuryEventRecord {
   ts: number;
 }
 
-export async function createTopup(
-  db: Db,
-  input: Omit<TopupRecord, "id" | "status" | "ts"> & { id?: string; status?: string; ts?: number },
-): Promise<TopupRecord> {
+const normalizeNonce = (nonce: CreateTopupInput["nonce"]): string | null => {
+  if (nonce === undefined || nonce === null) return null;
+  const text = String(nonce);
+  if (!/^\d+$/.test(text)) throw new Error(`topup nonce must be a non-negative integer, got ${text}`);
+  return text;
+};
+
+export async function createTopup(db: Db, input: CreateTopupInput): Promise<TopupRecord> {
+  const ts = input.ts ?? Date.now();
   const [row] = await db
     .insert(topups)
     .values({
       id: input.id ?? newId(),
       agentId: input.agentId,
+      nonce: normalizeNonce(input.nonce),
       usdcAmount: input.usdcAmount,
-      baseTx: input.baseTx,
-      zgTransferTx: input.zgTransferTx,
-      depositTx: input.depositTx,
-      firstPaidRequestId: input.firstPaidRequestId,
+      baseTx: input.baseTx ?? null,
+      zgTransferTx: input.zgTransferTx ?? null,
+      depositTx: input.depositTx ?? null,
+      firstPaidRequestId: input.firstPaidRequestId ?? null,
       status: input.status ?? "pending",
-      ts: input.ts ?? Date.now(),
+      ts,
+      updatedAt: ts,
     })
     .returning();
   if (!row) throw new Error("createTopup: insert returned no row");
   return toTopup(row);
+}
+
+/**
+ * Inserts a top-up unless one already exists for the same (agent, nonce) or the same id. Returns the
+ * stored row and whether this call created it. Safe to repeat: a replayed TopUpRequested log maps to the
+ * existing row, so it is never recorded or relayed twice.
+ */
+export async function createTopupIfAbsent(
+  db: Db,
+  input: CreateTopupInput,
+): Promise<{ topup: TopupRecord; created: boolean }> {
+  const nonce = normalizeNonce(input.nonce);
+  const id = input.id ?? newId();
+  const ts = input.ts ?? Date.now();
+  const [row] = await db
+    .insert(topups)
+    .values({
+      id,
+      agentId: input.agentId,
+      nonce,
+      usdcAmount: input.usdcAmount,
+      baseTx: input.baseTx ?? null,
+      zgTransferTx: input.zgTransferTx ?? null,
+      depositTx: input.depositTx ?? null,
+      firstPaidRequestId: input.firstPaidRequestId ?? null,
+      status: input.status ?? "pending",
+      ts,
+      updatedAt: ts,
+    })
+    .onConflictDoNothing()
+    .returning();
+  if (row) return { topup: toTopup(row), created: true };
+
+  const existing =
+    (nonce !== null ? await getTopupByNonce(db, input.agentId, nonce) : null) ?? (await getTopupById(db, id));
+  if (!existing) throw new Error("createTopupIfAbsent: insert conflicted but no matching top-up exists");
+  return { topup: existing, created: false };
+}
+
+/** The top-up for a TopUpRequested nonce, or null. */
+export async function getTopupByNonce(
+  db: Db,
+  agentId: string,
+  nonce: bigint | number | string,
+): Promise<TopupRecord | null> {
+  const [row] = await db
+    .select()
+    .from(topups)
+    .where(and(eq(topups.agentId, agentId), eq(topups.nonce, normalizeNonce(nonce) ?? "")))
+    .limit(1);
+  return row ? toTopup(row) : null;
+}
+
+async function getTopupById(db: Db, id: string): Promise<TopupRecord | null> {
+  const [row] = await db.select().from(topups).where(eq(topups.id, id)).limit(1);
+  return row ? toTopup(row) : null;
 }
 
 /** Updates status and tx references as the relayer progresses. Returns null if the top-up is unknown. */
@@ -63,10 +143,8 @@ export async function updateTopup(db: Db, id: string, patch: TopupPatch): Promis
   if (patch.zgTransferTx !== undefined) set.zgTransferTx = patch.zgTransferTx;
   if (patch.depositTx !== undefined) set.depositTx = patch.depositTx;
   if (patch.firstPaidRequestId !== undefined) set.firstPaidRequestId = patch.firstPaidRequestId;
-  if (Object.keys(set).length === 0) {
-    const [row] = await db.select().from(topups).where(eq(topups.id, id)).limit(1);
-    return row ? toTopup(row) : null;
-  }
+  if (Object.keys(set).length === 0) return getTopupById(db, id);
+  set.updatedAt = Date.now();
   const [row] = await db.update(topups).set(set).where(eq(topups.id, id)).returning();
   return row ? toTopup(row) : null;
 }
@@ -127,6 +205,7 @@ function toTopup(row: typeof topups.$inferSelect): TopupRecord {
   return {
     id: row.id,
     agentId: row.agentId,
+    nonce: row.nonce,
     usdcAmount: row.usdcAmount,
     baseTx: row.baseTx,
     zgTransferTx: row.zgTransferTx,
@@ -134,5 +213,6 @@ function toTopup(row: typeof topups.$inferSelect): TopupRecord {
     firstPaidRequestId: row.firstPaidRequestId,
     status: row.status,
     ts: row.ts,
+    updatedAt: row.updatedAt,
   };
 }

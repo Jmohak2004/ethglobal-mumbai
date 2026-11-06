@@ -19,3 +19,5 @@ export * from "./repo/stats.ts";
 export * from "./repo/forks.ts";
 export * from "./repo/guardrails.ts";
 export * from "./repo/tg.ts";
+export * from "./repo/insights.ts";
+export * from "./repo/cursors.ts";

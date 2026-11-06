@@ -148,10 +148,12 @@ function stats(overrides: Partial<StatsInput> & Pick<StatsInput, "entityId">): S
 }
 
 /** Raw SQL rows. PGlite returns { rows }, postgres-js returns an array. */
-async function rawRows<T>(query: ReturnType<typeof sql>): Promise<T[]> {
-  const result = (await db.execute(query)) as unknown as T[] | { rows: T[] };
+async function rawRowsOn<T>(on: Db, query: ReturnType<typeof sql>): Promise<T[]> {
+  const result = (await on.execute(query)) as unknown as T[] | { rows: T[] };
   return Array.isArray(result) ? result : result.rows;
 }
+
+const rawRows = <T>(query: ReturnType<typeof sql>): Promise<T[]> => rawRowsOn<T>(db, query);
 
 async function tableNames(): Promise<string[]> {
   const rows = await rawRows<{ table_name: string }>(
@@ -185,12 +187,51 @@ describe("migrations", () => {
     }
   });
 
-  test("migration statements contain no comments and each starts with CREATE", () => {
+  test("migration statements contain no comments and each is an idempotent CREATE, ALTER or UPDATE", () => {
     const statements = migrationStatements();
     expect(statements.length).toBeGreaterThan(40);
     for (const s of statements) {
-      expect(s.startsWith("CREATE ")).toBe(true);
+      expect(/^(CREATE|ALTER|UPDATE) /.test(s)).toBe(true);
       expect(s.includes("--")).toBe(false);
+    }
+  });
+
+  test("a database created before topups had nonce and updated_at is upgraded in place", async () => {
+    // Legacy shape: the topups table without the new columns, plus one row that must be backfilled.
+    const legacy = createDb({ memory: true });
+    try {
+      await legacy.execute(sql`
+        create table topups (
+          id text primary key,
+          agent_id text not null,
+          usdc_amount double precision not null,
+          base_tx text,
+          zg_transfer_tx text,
+          deposit_tx text,
+          first_paid_request_id text,
+          status text not null default 'pending',
+          ts bigint not null
+        )`);
+      await legacy.execute(sql`insert into topups (id, agent_id, usdc_amount, status, ts) values ('old-1', 'a', 1, 'deposited', 4242)`);
+
+      await migrate(legacy);
+      await migrate(legacy);
+
+      const cols = await rawRowsOn<{ column_name: string; is_nullable: string }>(
+        legacy,
+        sql`select column_name, is_nullable from information_schema.columns where table_name = 'topups' and column_name in ('nonce', 'updated_at')`,
+      );
+      expect(cols.map((c) => c.column_name).sort()).toEqual(["nonce", "updated_at"]);
+      expect(cols.find((c) => c.column_name === "updated_at")?.is_nullable).toBe("NO");
+
+      const [row] = await rawRowsOn<{ updated_at: number; nonce: string | null }>(
+        legacy,
+        sql`select updated_at, nonce from topups where id = 'old-1'`,
+      );
+      expect(Number(row?.updated_at)).toBe(4242);
+      expect(row?.nonce).toBeNull();
+    } finally {
+      await closeDb(legacy);
     }
   });
 

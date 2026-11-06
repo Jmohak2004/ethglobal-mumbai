@@ -298,6 +298,8 @@ export const topups = pgTable(
     agentId: text("agent_id")
       .notNull()
       .references(() => agents.id),
+    /** AgentTreasury TopUpRequested nonce, as decimal text (uint256). Unique per agent when set. */
+    nonce: text("nonce"),
     usdcAmount: doublePrecision("usdc_amount").notNull(),
     baseTx: text("base_tx"),
     zgTransferTx: text("zg_transfer_tx"),
@@ -305,8 +307,12 @@ export const topups = pgTable(
     firstPaidRequestId: text("first_paid_request_id"),
     status: text("status").notNull().default("pending"),
     ts: ms("ts").notNull(),
+    updatedAt: ms("updated_at").notNull(),
   },
-  (t) => [index("topups_agent_ts_idx").on(t.agentId, t.ts)],
+  (t) => [
+    index("topups_agent_ts_idx").on(t.agentId, t.ts),
+    uniqueIndex("topups_agent_nonce_idx").on(t.agentId, t.nonce),
+  ],
 );
 
 export const treasuryEvents = pgTable(
@@ -363,7 +369,7 @@ export const riskStates = pgTable(
 );
 
 // ---------------------------------------------------------------------------
-// Insights and sharing (schema only; no repo functions yet)
+// Insights and sharing (repo: repo/insights.ts)
 // ---------------------------------------------------------------------------
 
 export const insightItems = pgTable(
@@ -381,13 +387,18 @@ export const insightItems = pgTable(
       .notNull()
       .default(sql`'{}'::jsonb`),
   },
-  (t) => [index("insight_items_asset_ts_idx").on(t.asset, t.ts)],
+  (t) => [
+    index("insight_items_asset_ts_idx").on(t.asset, t.ts),
+    index("insight_items_source_idx").on(t.sourceKind, t.sourceRef, t.ts),
+  ],
 );
 
 export const insightDigests = pgTable(
   "insight_digests",
   {
     id: text("id").primaryKey(),
+    /** The agent the digest was produced for. Null for platform-wide digests. */
+    agentId: text("agent_id").references(() => agents.id),
     asset: text("asset").notNull(),
     stance: text("stance").notNull(),
     confidence: doublePrecision("confidence").notNull(),
@@ -398,8 +409,18 @@ export const insightDigests = pgTable(
     zgRequestId: text("zg_request_id"),
     ts: ms("ts").notNull(),
   },
-  (t) => [index("insight_digests_asset_ts_idx").on(t.asset, t.ts)],
+  (t) => [
+    index("insight_digests_asset_ts_idx").on(t.asset, t.ts),
+    index("insight_digests_agent_ts_idx").on(t.agentId, t.ts),
+  ],
 );
+
+/** Last fully processed block for a named chain scanner (e.g. the PerformanceReported sync). */
+export const chainCursors = pgTable("chain_cursors", {
+  name: text("name").primaryKey(),
+  block: ms("block").notNull(),
+  updatedAt: ms("updated_at").notNull(),
+});
 
 export const shareCards = pgTable(
   "share_cards",

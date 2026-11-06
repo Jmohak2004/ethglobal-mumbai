@@ -163,15 +163,22 @@ CREATE INDEX IF NOT EXISTS zg_keys_agent_idx ON zg_keys (agent_id);
 CREATE TABLE IF NOT EXISTS topups (
   id TEXT PRIMARY KEY,
   agent_id TEXT NOT NULL REFERENCES agents (id),
+  nonce TEXT,
   usdc_amount DOUBLE PRECISION NOT NULL,
   base_tx TEXT,
   zg_transfer_tx TEXT,
   deposit_tx TEXT,
   first_paid_request_id TEXT,
   status TEXT NOT NULL DEFAULT 'pending',
-  ts BIGINT NOT NULL
+  ts BIGINT NOT NULL,
+  updated_at BIGINT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS topups_agent_ts_idx ON topups (agent_id, ts);
+ALTER TABLE topups ADD COLUMN IF NOT EXISTS nonce TEXT;
+ALTER TABLE topups ADD COLUMN IF NOT EXISTS updated_at BIGINT;
+UPDATE topups SET updated_at = ts WHERE updated_at IS NULL;
+ALTER TABLE topups ALTER COLUMN updated_at SET NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS topups_agent_nonce_idx ON topups (agent_id, nonce);
 
 CREATE TABLE IF NOT EXISTS treasury_events (
   id TEXT PRIMARY KEY,
@@ -215,9 +222,11 @@ CREATE TABLE IF NOT EXISTS insight_items (
   raw JSONB NOT NULL DEFAULT '{}'::jsonb
 );
 CREATE INDEX IF NOT EXISTS insight_items_asset_ts_idx ON insight_items (asset, ts);
+CREATE INDEX IF NOT EXISTS insight_items_source_idx ON insight_items (source_kind, source_ref, ts);
 
 CREATE TABLE IF NOT EXISTS insight_digests (
   id TEXT PRIMARY KEY,
+  agent_id TEXT REFERENCES agents (id),
   asset TEXT NOT NULL,
   stance TEXT NOT NULL,
   confidence DOUBLE PRECISION NOT NULL,
@@ -225,7 +234,15 @@ CREATE TABLE IF NOT EXISTS insight_digests (
   zg_request_id TEXT,
   ts BIGINT NOT NULL
 );
+ALTER TABLE insight_digests ADD COLUMN IF NOT EXISTS agent_id TEXT REFERENCES agents (id);
 CREATE INDEX IF NOT EXISTS insight_digests_asset_ts_idx ON insight_digests (asset, ts);
+CREATE INDEX IF NOT EXISTS insight_digests_agent_ts_idx ON insight_digests (agent_id, ts);
+
+CREATE TABLE IF NOT EXISTS chain_cursors (
+  name TEXT PRIMARY KEY,
+  block BIGINT NOT NULL,
+  updated_at BIGINT NOT NULL
+);
 
 CREATE TABLE IF NOT EXISTS share_cards (
   id TEXT PRIMARY KEY,

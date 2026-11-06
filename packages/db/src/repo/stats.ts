@@ -19,41 +19,77 @@ export interface StatsInput {
   maxDrawdownBps: number;
   forecastHitRateBps: number;
   daysActive: number;
-  verified: { reportTx: `0x${string}`; asOf: number } | null;
-  selfFunded: boolean;
+  /**
+   * CRE verification. undefined keeps the stored verification, null clears it, and an object sets it.
+   * Use markStatsVerified to change only the verification.
+   */
+  verified?: { reportTx: `0x${string}`; asOf: number } | null;
+  /** undefined keeps the stored flag. */
+  selfFunded?: boolean;
   /** Defaults to now. */
   updatedAt?: number;
 }
 
-/** Creates or replaces stats rows by entityId. Idempotent. */
+/**
+ * Creates or updates stats rows by entityId. Idempotent. Fields that are not provided (undefined) keep
+ * their stored value, so a recompute does not drop a CRE verification.
+ */
 export async function upsertStats(db: Db, rows: StatsInput[]): Promise<void> {
   if (rows.length === 0) return;
   const now = Date.now();
-  const values = rows.map((r) => ({
-    entityId: r.entityId,
-    kind: r.kind,
-    name: r.name,
-    template: r.template,
-    mode: r.mode,
-    realizedPnlUsd: r.realizedPnlUsd,
-    pnlPct: r.realizedPnlPct,
-    volumeUsd: r.volumeUsd,
-    trades: r.trades,
-    winRateBps: r.winRateBps,
-    maxDrawdownBps: r.maxDrawdownBps,
-    forecastHitRateBps: r.forecastHitRateBps,
-    daysActive: r.daysActive,
-    verifiedTx: r.verified?.reportTx ?? null,
-    verifiedAsOf: r.verified?.asOf ?? null,
-    selfFunded: r.selfFunded,
-    updatedAt: r.updatedAt ?? now,
-  }));
   await db.transaction(async (tx) => {
-    for (const v of values) {
-      const { entityId, ...set } = v;
-      await tx.insert(agentStats).values(v).onConflictDoUpdate({ target: agentStats.entityId, set });
+    for (const r of rows) {
+      const base = {
+        kind: r.kind,
+        name: r.name,
+        template: r.template,
+        mode: r.mode,
+        realizedPnlUsd: r.realizedPnlUsd,
+        pnlPct: r.realizedPnlPct,
+        volumeUsd: r.volumeUsd,
+        trades: r.trades,
+        winRateBps: r.winRateBps,
+        maxDrawdownBps: r.maxDrawdownBps,
+        forecastHitRateBps: r.forecastHitRateBps,
+        daysActive: r.daysActive,
+        updatedAt: r.updatedAt ?? now,
+      };
+      const set: Partial<typeof agentStats.$inferInsert> = { ...base };
+      if (r.verified !== undefined) {
+        set.verifiedTx = r.verified?.reportTx ?? null;
+        set.verifiedAsOf = r.verified?.asOf ?? null;
+      }
+      if (r.selfFunded !== undefined) set.selfFunded = r.selfFunded;
+
+      await tx
+        .insert(agentStats)
+        .values({
+          entityId: r.entityId,
+          ...base,
+          verifiedTx: r.verified?.reportTx ?? null,
+          verifiedAsOf: r.verified?.asOf ?? null,
+          selfFunded: r.selfFunded ?? false,
+        })
+        .onConflictDoUpdate({ target: agentStats.entityId, set });
     }
   });
+}
+
+/**
+ * Records a CRE verification on an existing stats row and leaves every other field alone.
+ * Returns false when the entity has no stats row yet.
+ */
+export async function markStatsVerified(
+  db: Db,
+  entityId: string,
+  verified: { reportTx: `0x${string}`; asOf: number },
+): Promise<boolean> {
+  const rows = await db
+    .update(agentStats)
+    .set({ verifiedTx: verified.reportTx, verifiedAsOf: verified.asOf, updatedAt: Date.now() })
+    .where(eq(agentStats.entityId, entityId))
+    .returning({ entityId: agentStats.entityId });
+  return rows.length > 0;
 }
 
 export interface LeaderboardQuery {
