@@ -1,0 +1,20 @@
+{
+  "chainId": 84532,
+  "network": "baseSepolia",
+  "deployedAt": "2026-11-07",
+  "contracts": {
+    "AgentRegistry": "0x5396bcEec270cA05F9470c95eA1691e3cB037eB6",
+    "StrategyMarketplace": "0x8F812de59869Da2c85c50C58a0cafe177bbd6Ff2",
+    "PerformanceRegistry": "0xa69123a34E6387127d31A8BAbFE1eC52BCCC72a9",
+    "AgentTreasury": "0xA7Bb4EF5c8Dfc155cDFc2E6B36624797f02BcD2e",
+    "RiskOracle": "0x25e7c051C59c53Ca4Df55417160ad4673cf0B19a"
+  },
+  "config": {
+    "usdc": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+    "creForwarder": "0x82300bd7c3958625581cc2F77bC6464dcEcDF3e5",
+    "creForwarderKind": "simulation (MockKeystoneForwarder)",
+    "platformTreasury": "0x60779Ea0d2c7Fa2e74f311004f83Db9aD5dF744f",
+    "relayer": "0xf7F9f62bc580bcb98d0360cc0Aebb51EFC03A245",
+    "platformBps": 3000
+  }
+}
