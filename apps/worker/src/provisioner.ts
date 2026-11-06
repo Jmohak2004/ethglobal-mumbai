@@ -197,7 +197,8 @@ export async function provisionAgent(deps: ProvisionDeps, agent: Agent, opts: { 
     }
 
     // c. Capped 0G key. The plaintext secret is encrypted before it reaches the repo and is never logged.
-    if (!deps.zgAccount || !deps.encryptionKey) {
+    if (!deps.zgAccount || !deps.encryptionKey || current.status !== "active") {
+      // Paused agents get their key when resumed, so idle and sample agents don't fill the 0G account with keys.
       result.steps.zgKey = "skipped";
     } else if (state.zgKeyId) {
       result.steps.zgKey = "already";

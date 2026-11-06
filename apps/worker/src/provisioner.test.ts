@@ -92,7 +92,7 @@ async function freshDb(): Promise<Db> {
 
 /** A trading agent with no wallet yet, the state the web app creates. */
 async function unprovisionedAgent(db: Db, overrides: Partial<Parameters<typeof seedAgent>[1]> = {}): Promise<Agent> {
-  return seedAgent(db, { tradingWallet: ZERO, zgWallet: null, status: "paused", ...overrides });
+  return seedAgent(db, { tradingWallet: ZERO, zgWallet: null, status: "active", ...overrides });
 }
 
 describe("provisioning: happy path", () => {
@@ -129,6 +129,14 @@ describe("provisioning: happy path", () => {
       allowance,
       treasury: TREASURY,
     };
+  });
+
+  test("a paused agent gets wallets but no 0G key until it is active", async () => {
+    const paused = await unprovisionedAgent(db, { id: "paused-agent", status: "paused" } as never);
+    const result = await provisionAgent(deps, paused);
+    expect(result.steps.wallet).toBe("done");
+    expect(result.steps.zgKey).toBe("skipped");
+    expect(minter.calls).toHaveLength(0);
   });
 
   test("runs every step once and records each one", async () => {

@@ -4,6 +4,8 @@
 // The management-key balance is shared by the whole platform, so it cannot reflect one paper agent's top-ups.
 // Units: 0G. Billing strings from the Router are assumed to be 0G, not neuron (see report).
 
+import { billingTo0G } from "@arena/shared";
+import { zgPerUsd } from "./billing.ts";
 import { paperLedgerTotals, sumBillingSince, type Db } from "@arena/db";
 import type { Agent } from "@arena/shared";
 import { budgetTierFrom, type ZeroGAccount } from "@arena/zerog";
@@ -48,9 +50,13 @@ export function createBudgetSource(opts: BudgetSourceOptions): BudgetSource {
       if (opts.account && !paper) {
         try {
           const account = await opts.account.getBalance();
-          const total = Number(account.totalBalance);
-          if (!Number.isFinite(total)) throw new Error(`unparseable total_balance ${account.totalBalance}`);
-          balance = total;
+          const total = billingTo0G(
+            account.totalBalance,
+            account.currency === "usd" ? "usd_micro" : account.currency ? "neuron" : null,
+            zgPerUsd(),
+          );
+          if (total === null) throw new Error(`unparseable total_balance ${account.totalBalance}`);
+          balance = Number(total);
           source = "account";
         } catch (err) {
           logger.warn("0G balance read failed, estimating from billing", { agent: agent.id, error: err });

@@ -31,6 +31,8 @@ export interface CreatedKey {
 }
 
 export interface AccountBalance {
+  /** "usd" for USD-mode accounts (balances in micro-USD); otherwise balances are in neuron (1e-18 0G). */
+  currency: string | null;
   totalBalance: string | null;
   depositBalance: string | null;
   creditBalance: string | null;
@@ -94,6 +96,7 @@ export class ZeroGAccount {
     const data = isRecord(res.data) ? res.data : {};
     const str = (v: unknown) => (typeof v === "string" ? v : typeof v === "number" ? String(v) : null);
     return {
+      currency: typeof data.currency === "string" ? data.currency : null,
       totalBalance: str(data.total_balance),
       depositBalance: str(data.deposit_balance),
       creditBalance: str(data.credit_balance),
