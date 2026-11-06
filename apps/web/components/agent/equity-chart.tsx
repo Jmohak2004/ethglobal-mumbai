@@ -3,7 +3,7 @@
 import { AreaSeries, ColorType, createChart, type UTCTimestamp } from "lightweight-charts";
 import { useEffect, useRef } from "react";
 
-import type { EquityPoint } from "@/lib/data";
+import type { EquityPoint } from "@/lib/types";
 
 /** Aggregate equity area chart. Aggregate only; no individual trades. */
 export function EquityChart({ points }: { points: EquityPoint[] }) {

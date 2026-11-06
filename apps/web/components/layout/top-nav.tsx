@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 import { RiskPill } from "@/components/layout/risk-pill";
+import { SettingsPopover } from "@/components/layout/settings-popover";
 import { WalletButton } from "@/components/layout/wallet-button";
 import type { RiskLevel } from "@arena/shared";
 
@@ -49,6 +50,7 @@ export function TopNav({ risk }: { risk: RiskLevel }) {
           <span className="size-1.5 rounded-full bg-link" />
           Base
         </span>
+        <SettingsPopover />
         <WalletButton />
       </div>
     </header>

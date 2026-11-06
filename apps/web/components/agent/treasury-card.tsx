@@ -1,14 +1,67 @@
+"use client";
+
+import { useConnectModal } from "@rainbow-me/rainbowkit";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
+import { useAccount } from "wagmi";
+
 import { Button } from "@/components/ui/button";
+import { Field, Input } from "@/components/ui/form";
 import { Pill, type Tone } from "@/components/ui/pill";
 import { useToast } from "@/components/ui/toast";
-import type { AgentTreasury, TopUp } from "@/lib/data";
+import { describeError } from "@/lib/api";
+import { CONTRACTS } from "@/lib/contracts";
+import { NotDeployedError, readWithdrawable, withdrawOnchain } from "@/lib/onchain";
+import type { AgentTreasury, TopUp } from "@/lib/types";
 import { fmtAmount, fmtBps, fmtDateTime, fmtUsd, shortHash, txUrl, zgTxUrl } from "@/lib/format";
+import { wagmiConfig } from "@/lib/wagmi";
 
 const TOPUP_TONE: Record<TopUp["status"], Tone> = { credited: "long", pending: "warn" };
 
-/** Commission treasury: balance, reserve, withdrawable, and top-up history with tx links. */
-export function TreasuryCard({ treasury }: { treasury: AgentTreasury }) {
+/** Commission treasury: balances, reserve, withdrawable (read from AgentTreasury when deployed), and top-ups. */
+export function TreasuryCard({ treasury, agentId, demo }: { treasury: AgentTreasury; agentId: string; demo: boolean }) {
   const toast = useToast();
+  const qc = useQueryClient();
+  const { address } = useAccount();
+  const { openConnectModal } = useConnectModal();
+  const deployed = CONTRACTS.treasury !== null;
+  const [amount, setAmount] = useState<number | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const onchain = useQuery({
+    queryKey: ["withdrawable", agentId],
+    queryFn: () => readWithdrawable(wagmiConfig, agentId),
+    enabled: deployed,
+    refetchInterval: 30_000,
+    retry: false,
+  });
+  const withdrawable = deployed && onchain.data !== undefined ? onchain.data : treasury.withdrawableUsd;
+  const amountUsd = Math.min(withdrawable, Math.max(0.01, amount ?? withdrawable));
+  const amountOk = withdrawable > 0 && Number.isFinite(amountUsd) && (amount ?? withdrawable) <= withdrawable;
+
+  const withdraw = async () => {
+    if (!address) {
+      openConnectModal?.();
+      return;
+    }
+    setBusy(true);
+    try {
+      const hash = await withdrawOnchain(wagmiConfig, agentId, amountUsd);
+      toast({ title: "Withdrawn", description: `${fmtUsd(amountUsd, 2)} sent to the owner wallet. ${shortHash(hash)}`, tone: "success" });
+      setAmount(null);
+      await qc.invalidateQueries({ queryKey: ["withdrawable", agentId] });
+      await qc.invalidateQueries({ queryKey: ["treasury", agentId] });
+    } catch (err) {
+      toast({
+        title: "Withdraw failed",
+        description: err instanceof NotDeployedError ? "Contracts not deployed" : describeError(err),
+        tone: "error",
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div className="flex flex-col gap-3 p-3">
       <dl className="num grid grid-cols-2 gap-y-1.5 text-[12px]">
@@ -17,7 +70,9 @@ export function TreasuryCard({ treasury }: { treasury: AgentTreasury }) {
         <dt className="text-muted">Reserve (3 days)</dt>
         <dd className="text-right">{fmtUsd(treasury.reserveUsd, 4)}</dd>
         <dt className="text-muted">Withdrawable</dt>
-        <dd className="text-right text-long">{fmtUsd(treasury.withdrawableUsd, 4)}</dd>
+        <dd className="text-right text-long">
+          {fmtUsd(withdrawable, 4)} <span className="text-muted">{deployed && onchain.data !== undefined ? "on-chain" : "estimate"}</span>
+        </dd>
         <dt className="text-muted">Commission owed</dt>
         <dd className="text-right">
           {fmtUsd(treasury.commissionOwedUsd, 4)} <span className="text-muted">@ {fmtBps(treasury.commissionBps)}</span>
@@ -25,15 +80,33 @@ export function TreasuryCard({ treasury }: { treasury: AgentTreasury }) {
         <dt className="text-muted">Commission paid</dt>
         <dd className="text-right">{fmtUsd(treasury.commissionPaidUsd, 4)}</dd>
       </dl>
-      <Button
-        variant="secondary"
-        disabled={treasury.withdrawableUsd <= 0}
-        onClick={() =>
-          toast({ title: "Withdraw coming soon", description: "Owner-signed withdraw(agentId, amount) is not wired yet." })
-        }
-      >
-        Withdraw {fmtUsd(treasury.withdrawableUsd, 2)}
-      </Button>
+
+      {deployed ? (
+        <div className="flex flex-col gap-2">
+          <Field label="Amount (USD)" hint={`Up to ${fmtUsd(withdrawable, 4)} withdrawable`}>
+            <Input
+              type="number"
+              aria-label="Withdraw amount"
+              min={0.01}
+              max={withdrawable}
+              step={0.01}
+              value={amount ?? fmtAmount(withdrawable, 4)}
+              onChange={(e) => setAmount(e.target.valueAsNumber)}
+            />
+          </Field>
+          <Button
+            variant="secondary"
+            disabled={demo || !amountOk || busy}
+            onClick={withdraw}
+          >
+            {demo ? "Connect the owner wallet to withdraw" : busy ? "Withdrawing…" : `Withdraw ${fmtUsd(amountUsd, 2)}`}
+          </Button>
+        </div>
+      ) : (
+        <Button variant="secondary" disabled>
+          Contracts not deployed
+        </Button>
+      )}
 
       <div>
         <div className="mb-1 text-[10.5px] font-medium uppercase tracking-wider text-muted">Recent top-ups</div>

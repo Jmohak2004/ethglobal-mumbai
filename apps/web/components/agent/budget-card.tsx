@@ -1,7 +1,7 @@
 import { clsx } from "clsx";
 
 import type { BudgetTier } from "@arena/shared";
-import type { ZgBudget } from "@/lib/data";
+import type { ZgBudget } from "@/lib/types";
 import { fmtAmount, fmtUsd } from "@/lib/format";
 
 const TIERS: { tier: BudgetTier; label: string; rule: string; bar: string }[] = [

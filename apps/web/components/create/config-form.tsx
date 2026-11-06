@@ -29,12 +29,16 @@ interface ConfigFormProps {
   name: string;
   onName: (n: string) => void;
   agents: AgentOption[];
+  live: boolean;
+  onLive: (v: boolean) => void;
+  /** False when the server is not in EXECUTION_MODE=live. The agent is then created in paper mode. */
+  liveAvailable: boolean;
 }
 
 const SHARED_CAP_HINT = (cap: number) => `Demo cap $${cap}`;
 
 /** Every control for a StrategyConfig, grouped into panels. Limits clamp to demo caps; sliders flag out-of-range values. */
-export function ConfigForm({ config, onChange, name, onName, agents }: ConfigFormProps) {
+export function ConfigForm({ config, onChange, name, onName, agents, live, onLive, liveAvailable }: ConfigFormProps) {
   const tpl = getTemplate(config.template);
   const patch = (p: Partial<StrategyConfig>) => onChange({ ...config, ...p });
   const setLimit = (p: Partial<AgentLimits>) => patch({ limits: { ...config.limits, ...p } });
@@ -78,6 +82,17 @@ export function ConfigForm({ config, onChange, name, onName, agents }: ConfigFor
           <div className="text-[12px] text-muted">
             Template: <span className="text-text">{tpl?.name}</span>
           </div>
+        </div>
+        <div className="flex items-center justify-between gap-4 border-t border-border px-3 py-2.5">
+          <div>
+            <div className="text-[12px] text-text">Run live</div>
+            <div className="text-[11.5px] text-muted">
+              {liveAvailable
+                ? "Real Flash orders, signed by your wallet. Off means paper (simulated)."
+                : "Unavailable: this server runs in paper mode (EXECUTION_MODE is not live). The agent will be paper."}
+            </div>
+          </div>
+          <Switch label="Run live" checked={live && liveAvailable} disabled={!liveAvailable} onChange={onLive} />
         </div>
       </Panel>
 

@@ -1,6 +1,7 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useConnectModal } from "@rainbow-me/rainbowkit";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { PerformanceStats } from "@arena/shared";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
@@ -10,18 +11,25 @@ import { useAccount } from "wagmi";
 import { WalletButton } from "@/components/layout/wallet-button";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Field, Input, Switch } from "@/components/ui/form";
+import { Modal } from "@/components/ui/modal";
 import { Panel } from "@/components/ui/panel";
 import { Pill, type Tone } from "@/components/ui/pill";
 import { SkeletonRows } from "@/components/ui/skeleton";
-import { Switch } from "@/components/ui/form";
 import { EmptyRow, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
-import { getJson } from "@/lib/api";
-import type { OwnedAgent } from "@/lib/data";
+import { describeError, getJson } from "@/lib/api";
+import { CONTRACTS } from "@/lib/contracts";
 import { fmtBps, fmtNum, fmtPct, fmtUsd, fmtUsdSigned, pnlClass, shortAddr } from "@/lib/format";
+import { usePlatform } from "@/lib/hooks/use-platform";
+import { useSession } from "@/lib/hooks/use-session";
+import { fundOnchain, NotDeployedError, withdrawOnchain } from "@/lib/onchain";
 import { DEMO_OWNER, getTemplate } from "@/lib/templates";
+import type { OwnedAgent } from "@/lib/types";
+import { wagmiConfig } from "@/lib/wagmi";
 
 const TELEGRAM_BOT = process.env.NEXT_PUBLIC_TELEGRAM_BOT || "arena_demo_bot";
+const UNPROVISIONED = "0x0000000000000000000000000000000000000000";
 
 const STATUS_TONE: Record<OwnedAgent["status"], Tone> = { active: "long", paused: "warn", stopped: "muted" };
 const TIER_TONE: Record<OwnedAgent["budgetTier"], Tone> = {
@@ -35,12 +43,15 @@ export function PortfolioView() {
   const sp = useSearchParams();
   const demo = sp.get("owner") === "1";
   const { address, isConnected } = useAccount();
-  const owner = demo ? DEMO_OWNER : isConnected && address ? address : null;
+  const session = useSession({ prompt: true });
+  const owner = demo && !isConnected ? DEMO_OWNER : isConnected && address ? address : null;
+  const canList = demo ? !isConnected : session.signedIn;
 
   const agents = useQuery({
-    queryKey: ["my-agents", owner],
-    queryFn: () => getJson<OwnedAgent[]>(`/api/agents?owner=${owner}`),
-    enabled: !!owner,
+    queryKey: ["my-agents", owner, demo],
+    queryFn: () => getJson<OwnedAgent[]>(`/api/agents?owner=${owner}${demo && !isConnected ? "&demo=1" : ""}`),
+    enabled: !!owner && canList,
+    retry: false,
   });
   const human = useQuery({
     queryKey: ["human-stats", owner],
@@ -81,10 +92,17 @@ export function PortfolioView() {
             </Link>
           }
         >
-          {agents.isPending ? (
+          {!canList ? (
+            <div className="flex flex-wrap items-center gap-3 p-3 text-[12px] text-muted">
+              <span>Sign in with your wallet to list the agents you own.</span>
+              <Button variant="secondary" onClick={() => session.signIn().catch(() => undefined)}>
+                Sign in
+              </Button>
+            </div>
+          ) : agents.isPending ? (
             <SkeletonRows rows={3} />
           ) : agents.isError ? (
-            <div className="p-3 text-[12px] text-short">{agents.error.message}</div>
+            <div className="p-3 text-[12px] text-short">{describeError(agents.error)}</div>
           ) : (
             <MyAgentsTable agents={agents.data ?? []} />
           )}
@@ -101,74 +119,173 @@ export function PortfolioView() {
 
 function MyAgentsTable({ agents }: { agents: OwnedAgent[] }) {
   const toast = useToast();
-  const stub = (what: string) => () =>
-    toast({ title: `${what} coming soon`, description: "Needs an owner-signed transaction." });
+  const [fundFor, setFundFor] = useState<OwnedAgent | null>(null);
+  const [withdrawing, setWithdrawing] = useState<string | null>(null);
+  const qc = useQueryClient();
+  const { openConnectModal } = useConnectModal();
+  const { address } = useAccount();
+
+  const withdraw = async (a: OwnedAgent) => {
+    if (!address) return openConnectModal?.();
+    setWithdrawing(a.id);
+    try {
+      await withdrawOnchain(wagmiConfig, a.id, a.withdrawableUsd);
+      toast({ title: "Withdrawn", description: `${fmtUsd(a.withdrawableUsd, 2)} sent to your wallet.`, tone: "success" });
+      await qc.invalidateQueries({ queryKey: ["my-agents"] });
+    } catch (err) {
+      toast({
+        title: "Withdraw failed",
+        description: err instanceof NotDeployedError ? "Contracts not deployed" : describeError(err),
+        tone: "error",
+      });
+    } finally {
+      setWithdrawing(null);
+    }
+  };
 
   return (
-    <Table bare>
-      <THead>
-        <tr>
-          <TH>Agent</TH>
-          <TH>Status</TH>
-          <TH>Mode</TH>
-          <TH align="right">Allocation</TH>
-          <TH align="right">PnL</TH>
-          <TH>Budget</TH>
-          <TH align="right">Withdrawable</TH>
-          <TH align="right">Actions</TH>
-        </tr>
-      </THead>
-      <tbody>
-        {agents.length === 0 ? (
-          <EmptyRow colSpan={8}>
-            No agents yet. <Link href="/create" className="text-link hover:underline">Create one</Link>.
-          </EmptyRow>
-        ) : null}
-        {agents.map((a) => {
-          const tpl = getTemplate(a.config.template);
-          const pnl = a.stats?.realizedPnlUsd ?? 0;
-          return (
-            <TR key={a.id}>
-              <TD>
-                <div className="flex items-center gap-2">
-                  <Link href={`/agents/${a.id}`} className="font-medium hover:underline">
-                    {a.name}
-                  </Link>
-                  <Badge>{tpl?.name ?? a.config.template}</Badge>
-                </div>
-              </TD>
-              <TD>
-                <Pill tone={STATUS_TONE[a.status]}>{a.status}</Pill>
-              </TD>
-              <TD>
-                <Badge tone={a.mode === "paper" ? "warn" : "accent"}>{a.mode === "paper" ? "Paper" : "Live"}</Badge>
-              </TD>
-              <TD align="right">{fmtUsd(a.allocationUsd)}</TD>
-              <TD align="right" className={pnlClass(pnl)}>
-                {fmtUsdSigned(pnl)}
-              </TD>
-              <TD>
-                <Pill tone={TIER_TONE[a.budgetTier]}>{a.budgetTier}</Pill>
-              </TD>
-              <TD align="right">{fmtUsd(a.withdrawableUsd, 2)}</TD>
-              <TD align="right">
-                <div className="flex justify-end gap-1">
-                  <Button size="sm" onClick={stub("Fund")}>
-                    Fund
-                  </Button>
-                  <Button size="sm" variant="ghost" onClick={stub(a.status === "active" ? "Pause" : "Resume")}>
-                    {a.status === "active" ? "Pause" : "Resume"}
-                  </Button>
-                  <Button size="sm" variant="ghost" disabled={a.withdrawableUsd <= 0} onClick={stub("Withdraw")}>
-                    Withdraw
-                  </Button>
-                </div>
-              </TD>
-            </TR>
-          );
-        })}
-      </tbody>
-    </Table>
+    <>
+      <Table bare>
+        <THead>
+          <tr>
+            <TH>Agent</TH>
+            <TH>Status</TH>
+            <TH>Mode</TH>
+            <TH align="right">Allocation</TH>
+            <TH align="right">PnL</TH>
+            <TH>Budget</TH>
+            <TH align="right">Withdrawable</TH>
+            <TH align="right">Actions</TH>
+          </tr>
+        </THead>
+        <tbody>
+          {agents.length === 0 ? (
+            <EmptyRow colSpan={8}>
+              No agents yet. <Link href="/create" className="text-link hover:underline">Create one</Link>.
+            </EmptyRow>
+          ) : null}
+          {agents.map((a) => {
+            const tpl = getTemplate(a.config.template);
+            const pnl = a.stats?.realizedPnlUsd ?? 0;
+            return (
+              <TR key={a.id}>
+                <TD>
+                  <div className="flex items-center gap-2">
+                    <Link href={`/agents/${a.id}`} className="font-medium hover:underline">
+                      {a.name}
+                    </Link>
+                    <Badge>{tpl?.name ?? a.config.template}</Badge>
+                  </div>
+                </TD>
+                <TD>
+                  <Pill tone={STATUS_TONE[a.status]}>{a.status}</Pill>
+                </TD>
+                <TD>
+                  <Badge tone={a.mode === "paper" ? "warn" : "accent"}>{a.mode === "paper" ? "Paper" : "Live"}</Badge>
+                </TD>
+                <TD align="right">{fmtUsd(a.allocationUsd)}</TD>
+                <TD align="right" className={pnlClass(pnl)}>
+                  {fmtUsdSigned(pnl)}
+                </TD>
+                <TD>
+                  <Pill tone={TIER_TONE[a.budgetTier]}>{a.budgetTier}</Pill>
+                </TD>
+                <TD align="right">{fmtUsd(a.withdrawableUsd, 2)}</TD>
+                <TD align="right">
+                  <div className="flex justify-end gap-1">
+                    <Button
+                      size="sm"
+                      onClick={() => setFundFor(a)}
+                      disabled={a.tradingWallet === UNPROVISIONED}
+                      title={a.tradingWallet === UNPROVISIONED ? "Trading wallet not provisioned yet" : undefined}
+                    >
+                      Fund
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() =>
+                        toast({
+                          title: `${a.status === "active" ? "Pause" : "Resume"} not wired yet`,
+                          description: "Needs an owner-signed status change.",
+                        })
+                      }
+                    >
+                      {a.status === "active" ? "Pause" : "Resume"}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={a.withdrawableUsd <= 0 || withdrawing === a.id || !CONTRACTS.treasury}
+                      onClick={() => withdraw(a)}
+                      title={CONTRACTS.treasury ? undefined : "Contracts not deployed"}
+                    >
+                      {CONTRACTS.treasury ? (withdrawing === a.id ? "Withdrawing…" : "Withdraw") : "Contracts not deployed"}
+                    </Button>
+                  </div>
+                </TD>
+              </TR>
+            );
+          })}
+        </tbody>
+      </Table>
+      {fundFor ? <FundModal agent={fundFor} onClose={() => setFundFor(null)} /> : null}
+    </>
+  );
+}
+
+/** USDC transfer to the agent's trading wallet, capped at MAX_AGENT_ALLOCATION_USD. */
+function FundModal({ agent, onClose }: { agent: OwnedAgent; onClose: () => void }) {
+  const toast = useToast();
+  const platform = usePlatform();
+  const { address } = useAccount();
+  const { openConnectModal } = useConnectModal();
+  const qc = useQueryClient();
+  const cap = platform.data?.caps.maxAgentAllocationUsd ?? agent.allocationUsd;
+  const [amount, setAmount] = useState(Math.min(1, cap));
+  const [busy, setBusy] = useState(false);
+  const ok = Number.isFinite(amount) && amount >= 0.01 && amount <= cap;
+
+  const send = async () => {
+    if (!address) return openConnectModal?.();
+    setBusy(true);
+    try {
+      await fundOnchain(wagmiConfig, agent.tradingWallet, amount);
+      toast({ title: "Funded", description: `${fmtUsd(amount, 2)} USDC sent to ${agent.name}.`, tone: "success" });
+      await qc.invalidateQueries({ queryKey: ["my-agents"] });
+      onClose();
+    } catch (err) {
+      toast({ title: "Fund failed", description: err instanceof NotDeployedError ? "Contracts not deployed" : describeError(err), tone: "error" });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal open onClose={onClose} title={`Fund ${agent.name}`} width="max-w-md">
+      <div className="flex flex-col gap-3 text-[12.5px]">
+        <Field label="Amount (USDC)" hint={`Capped at ${fmtUsd(cap, 2)} per agent (MAX_AGENT_ALLOCATION_USD)`}>
+          <Input
+            type="number"
+            aria-label="Fund amount"
+            min={0.01}
+            max={cap}
+            step={0.01}
+            value={Number.isFinite(amount) ? amount : ""}
+            onChange={(e) => setAmount(e.target.valueAsNumber)}
+          />
+        </Field>
+        <div className="num text-[11.5px] text-muted">To {agent.tradingWallet}</div>
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button variant="long" disabled={!ok || busy} onClick={send}>
+            {busy ? "Sending…" : `Send ${fmtUsd(ok ? amount : 0, 2)} USDC`}
+          </Button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 

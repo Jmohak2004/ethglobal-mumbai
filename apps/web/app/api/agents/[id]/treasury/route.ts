@@ -1,12 +1,18 @@
 import { NextResponse } from "next/server";
 
-import { getAgentTreasury } from "@/lib/data";
+import { getAgent, getAgentTreasury } from "@/lib/data";
+import { ApiError, route } from "@/lib/server/errors";
+import { assertOwnerAccess } from "@/lib/server/session";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+/** Treasury balances, commission and budget. Owner only. */
+export const GET = route(async (req: Request, { params }: { params: Promise<{ id: string }> }) => {
   const { id } = await params;
+  const agent = await getAgent(id);
+  if (!agent) throw new ApiError(404, "NOT_FOUND", "Agent not found");
+  assertOwnerAccess(req, agent.ownerAddress, { demo: new URL(req.url).searchParams.get("owner") === "1" });
   const treasury = await getAgentTreasury(id);
-  if (!treasury) return NextResponse.json({ error: "agent not found" }, { status: 404 });
+  if (!treasury) throw new ApiError(404, "NOT_FOUND", "Agent not found");
   return NextResponse.json(treasury);
-}
+});

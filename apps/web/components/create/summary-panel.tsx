@@ -11,11 +11,13 @@ export function SummaryPanel({
   name,
   config,
   ownerLabel,
+  mode,
   errors,
 }: {
   name: string;
   config: StrategyConfig;
   ownerLabel: string | null;
+  mode: "paper" | "live";
   errors: string[];
 }) {
   const tpl = getTemplate(config.template);
@@ -24,6 +26,7 @@ export function SummaryPanel({
     ["Template", tpl?.name ?? config.template],
     ["Name", name.trim() || "not set"],
     ["Owner", ownerLabel ? (ownerLabel.startsWith("0x") ? shortAddr(ownerLabel) : ownerLabel) : "not connected"],
+    ["Mode", mode],
     ["Assets", config.assets.join(", ")],
     ["Sliders", tpl ? tpl.sliders.map((s) => `${s.label} ${config.sliders[s.key] ?? s.default}${s.unit}`).join(" · ") : "-"],
     ["Max trade", `$${config.limits.maxTradeUsd}`],

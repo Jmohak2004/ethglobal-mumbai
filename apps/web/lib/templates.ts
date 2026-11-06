@@ -1,5 +1,7 @@
-// Strategy templates, slider definitions and create-form validation.
+// Strategy templates, slider definitions and client-side form pre-checks.
 // Client-safe: only `import type` from @arena/shared, no runtime imports.
+// Slider keys, bounds, steps and defaults MIRROR packages/policy/src/templates.ts. The server validates
+// with @arena/policy validateConfig, which rejects any drift, so keep the two in sync.
 import type {
   AgentLimits,
   CrashMode,
@@ -29,6 +31,12 @@ export interface TemplateDef {
   sliders: SliderDef[];
 }
 
+// Shared protection sliders (bounds from policy PROTECTION_BOUNDS).
+const minConfidence: SliderDef = { key: "minConfidence", label: "Min confidence", min: 0, max: 100, step: 1, default: 60, unit: "%" };
+const sizePct: SliderDef = { key: "sizePct", label: "Position size", min: 5, max: 100, step: 1, default: 25, unit: "% alloc" };
+const takeProfitPct: SliderDef = { key: "takeProfitPct", label: "Take-profit", min: 0.5, max: 20, step: 0.5, default: 4, unit: "%" };
+const stopLossPct: SliderDef = { key: "stopLossPct", label: "Stop-loss", min: 0.5, max: 15, step: 0.5, default: 2, unit: "%" };
+
 export const TEMPLATES: TemplateDef[] = [
   {
     id: "momentum",
@@ -38,11 +46,11 @@ export const TEMPLATES: TemplateDef[] = [
     orderTypes: ["limit", "market", "trailing-stop", "bracket"],
     sliders: [
       { key: "lookbackBars", label: "Lookback", min: 5, max: 100, step: 1, default: 20, unit: "bars" },
-      { key: "entryConfidenceMin", label: "Min entry confidence", min: 50, max: 95, step: 1, default: 65, unit: "%" },
-      { key: "sizePct", label: "Size", min: 1, max: 100, step: 1, default: 50, unit: "% alloc" },
-      { key: "takeProfitPct", label: "Take-profit", min: 0.5, max: 10, step: 0.1, default: 3, unit: "%" },
-      { key: "stopLossPct", label: "Stop-loss", min: 0.5, max: 10, step: 0.1, default: 2, unit: "%" },
-      { key: "trailPct", label: "Trailing stop", min: 0.5, max: 10, step: 0.1, default: 1.5, unit: "%" },
+      minConfidence,
+      sizePct,
+      takeProfitPct,
+      stopLossPct,
+      { key: "trailPct", label: "Trailing stop", min: 0.5, max: 10, step: 0.5, default: 2, unit: "%" },
     ],
   },
   {
@@ -52,12 +60,13 @@ export const TEMPLATES: TemplateDef[] = [
     logic: "RSI / Bollinger extremes, LLM regime check. Limit entry with bracket.",
     orderTypes: ["limit", "bracket"],
     sliders: [
-      { key: "rsiLow", label: "RSI buy band (below)", min: 10, max: 40, step: 1, default: 30, unit: "RSI" },
-      { key: "rsiHigh", label: "RSI sell band (above)", min: 60, max: 90, step: 1, default: 70, unit: "RSI" },
-      { key: "sizePct", label: "Size", min: 1, max: 100, step: 1, default: 40, unit: "% alloc" },
-      { key: "takeProfitPct", label: "Take-profit", min: 0.5, max: 10, step: 0.1, default: 2.5, unit: "%" },
-      { key: "stopLossPct", label: "Stop-loss", min: 0.5, max: 10, step: 0.1, default: 1.5, unit: "%" },
-      { key: "maxHoldHours", label: "Max hold time", min: 1, max: 72, step: 1, default: 24, unit: "h" },
+      { key: "rsiLow", label: "RSI oversold", min: 5, max: 45, step: 1, default: 30, unit: "RSI" },
+      { key: "rsiHigh", label: "RSI overbought", min: 55, max: 95, step: 1, default: 70, unit: "RSI" },
+      minConfidence,
+      sizePct,
+      takeProfitPct,
+      stopLossPct,
+      { key: "maxHoldMin", label: "Max hold", min: 15, max: 10080, step: 15, default: 240, unit: "min" },
     ],
   },
   {
@@ -67,25 +76,26 @@ export const TEMPLATES: TemplateDef[] = [
     logic: "Range high/low with an LLM false-breakout filter. Stop-buy with bracket.",
     orderTypes: ["stop", "bracket"],
     sliders: [
-      { key: "rangeWindowBars", label: "Range window", min: 10, max: 200, step: 1, default: 48, unit: "bars" },
-      { key: "breakoutPct", label: "Breakout distance", min: 0, max: 5, step: 0.1, default: 0.5, unit: "%" },
-      { key: "sizePct", label: "Size", min: 1, max: 100, step: 1, default: 35, unit: "% alloc" },
-      { key: "takeProfitPct", label: "Take-profit", min: 0.5, max: 10, step: 0.1, default: 4, unit: "%" },
-      { key: "stopLossPct", label: "Stop-loss", min: 0.5, max: 10, step: 0.1, default: 2, unit: "%" },
+      { key: "rangeBars", label: "Range window", min: 5, max: 200, step: 1, default: 20, unit: "bars" },
+      { key: "breakoutPct", label: "Breakout distance", min: 0.1, max: 5, step: 0.1, default: 0.5, unit: "%" },
+      minConfidence,
+      sizePct,
+      takeProfitPct,
+      stopLossPct,
     ],
   },
   {
     id: "smart_dca",
     name: "Smart DCA",
     blurb: "Buy slowly over time.",
-    logic: "Scheduled accumulation; LLM raises the multiplier on dips. TWAP entries.",
+    logic: "Scheduled TWAP accumulation. The LLM may raise the bucket multiplier on dips, up to the cap.",
     orderTypes: ["twap", "limit"],
     sliders: [
-      { key: "budgetUsd", label: "Budget", min: 1, max: 5, step: 0.5, default: 2, unit: "USD" },
-      { key: "periodMin", label: "Period", min: 15, max: 1440, step: 15, default: 60, unit: "min" },
-      { key: "buckets", label: "TWAP buckets", min: 2, max: 24, step: 1, default: 6, unit: "x" },
-      { key: "dipMultiplierMax", label: "Dip multiplier max", min: 1, max: 3, step: 0.1, default: 1.5, unit: "x" },
-      { key: "stopLossFloorPct", label: "Stop-loss floor", min: 5, max: 50, step: 1, default: 20, unit: "%" },
+      { key: "budgetUsd", label: "Budget", min: 1, max: 1000, step: 1, default: 5, unit: "USD" },
+      { key: "periodMin", label: "Period", min: 5, max: 10080, step: 5, default: 60, unit: "min" },
+      { key: "buckets", label: "Buckets", min: 2, max: 2560, step: 1, default: 10, unit: "#" },
+      { key: "dipMultiplierMax", label: "Dip multiplier max", min: 1, max: 5, step: 0.1, default: 2, unit: "x" },
+      { key: "stopLossFloorPct", label: "Stop-loss floor", min: 0.5, max: 15, step: 0.5, default: 10, unit: "%" },
     ],
   },
   {
@@ -95,11 +105,11 @@ export const TEMPLATES: TemplateDef[] = [
     logic: "Insight digest across sources plus LLM forecast. Limit entry with bracket.",
     orderTypes: ["limit", "bracket"],
     sliders: [
-      { key: "minSourceAgreementPct", label: "Min source agreement", min: 50, max: 100, step: 1, default: 66, unit: "%" },
-      { key: "minConfidencePct", label: "Min confidence", min: 50, max: 95, step: 1, default: 60, unit: "%" },
-      { key: "sizePct", label: "Size", min: 1, max: 100, step: 1, default: 30, unit: "% alloc" },
-      { key: "takeProfitPct", label: "Take-profit", min: 0.5, max: 10, step: 0.1, default: 3, unit: "%" },
-      { key: "stopLossPct", label: "Stop-loss", min: 0.5, max: 10, step: 0.1, default: 2, unit: "%" },
+      { key: "minSourceAgreement", label: "Min source agreement", min: 0, max: 100, step: 1, default: 60, unit: "%" },
+      minConfidence,
+      sizePct,
+      takeProfitPct,
+      stopLossPct,
     ],
   },
 ];
@@ -112,7 +122,7 @@ export function getTemplate(id: string): TemplateDef | undefined {
 
 export const ASSET_ALLOWLIST: string[] = ["WETH", "cbBTC"];
 
-/** Demo caps. Create-form inputs clamp to these; the server rejects anything above. */
+/** Demo caps. Create-form inputs clamp to these; the server enforces the live env values. */
 export const DEMO_CAPS = {
   maxTradeUsd: 1,
   maxAllocationUsd: 5,
@@ -127,7 +137,7 @@ export const FORK_PRICE_MAX_USD = 50;
 export const TICK_SEC = { min: 60, max: 3600, default: 300 } as const;
 export const FLASH_INTEGRATOR_FEE_BPS = 10;
 
-/** Demo owner used by `?owner=1` (no wallet needed). Also seeded as a human on the board. */
+/** Demo owner used by `?owner=1` (no wallet needed). Also seeded as a human on the board. Non-production only. */
 export const DEMO_OWNER = "0x4e1b0c2a9f3d7b8e5a6c1d0f2e9b3a7c8d5e6f10" as const;
 
 export type Timeframe = "24h" | "7d" | "30d" | "all";
@@ -148,6 +158,15 @@ export const CRASH_MODES: { value: CrashMode; label: string; note: string }[] = 
   { value: "tighten_stops", label: "Tighten stops", note: "On HALT: cancel entries and tighten stop-losses." },
   { value: "flatten", label: "Flatten to USDC", note: "On HALT: cancel entries and sell everything to USDC." },
 ];
+
+/** Template index used by AgentRegistry.Agent.template (uint8). Order matches TEMPLATES. */
+export const TEMPLATE_INDEX: Record<TemplateId, number> = {
+  momentum: 0,
+  mean_reversion: 1,
+  breakout: 2,
+  smart_dca: 3,
+  social_sentiment: 4,
+};
 
 // ---- Defaults and builders ----
 
@@ -185,7 +204,7 @@ export function defaultStrategy(id: TemplateId): StrategyConfig {
   };
 }
 
-// ---- Validation (shared by POST /api/agents and the builder) ----
+// ---- Client pre-check (fast feedback in the form). The server re-validates with @arena/policy. ----
 
 export interface CreateInput {
   name: string;

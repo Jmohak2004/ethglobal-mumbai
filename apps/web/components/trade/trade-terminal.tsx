@@ -10,7 +10,7 @@ import { OrderTicket, type TicketPrefill } from "@/components/trade/order-ticket
 import { PriceChart } from "@/components/trade/price-chart";
 import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/ui/panel";
-import type { TradingActivity } from "@/lib/data";
+import type { TradingActivity } from "@/lib/types";
 
 interface Props {
   markets: MarketSnapshot[];

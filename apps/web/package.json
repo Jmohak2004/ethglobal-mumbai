@@ -10,9 +10,11 @@
     "typecheck": "tsc --noEmit -p ."
   },
   "dependencies": {
-    "@arena/shared": "workspace:*",
     "@arena/db": "workspace:*",
+    "@arena/flash": "workspace:*",
     "@arena/policy": "workspace:*",
+    "@arena/shared": "workspace:*",
+    "@arena/zerog": "workspace:*",
     "@rainbow-me/rainbowkit": "^2.2.11",
     "@tanstack/react-query": "^5.90.0",
     "clsx": "^2.1.1",

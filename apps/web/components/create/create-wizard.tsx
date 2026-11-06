@@ -12,7 +12,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/ui/panel";
 import { useToast } from "@/components/ui/toast";
-import { postJson } from "@/lib/api";
+import { describeError, postJson, ApiClientError } from "@/lib/api";
+import { usePlatform } from "@/lib/hooks/use-platform";
+import { useSession } from "@/lib/hooks/use-session";
 import { DEMO_OWNER, TEMPLATES, defaultStrategy, validateCreateInput } from "@/lib/templates";
 
 export interface AgentOption {
@@ -20,43 +22,71 @@ export interface AgentOption {
   name: string;
 }
 
-/** Two-step builder: pick a template, then tune sliders and limits. Submits to POST /api/agents. */
+/** Two-step builder: pick a template, then tune sliders and limits. Submits to POST /api/agents (session required). */
 export function CreateWizard({ agents, demo }: { agents: AgentOption[]; demo: boolean }) {
   const router = useRouter();
   const toast = useToast();
   const { address, isConnected } = useAccount();
+  const session = useSession({ prompt: false });
+  const platform = usePlatform();
+  const liveAvailable = platform.data?.executionMode === "live";
 
   const [step, setStep] = useState<1 | 2>(1);
   const [name, setName] = useState("");
   const [config, setConfig] = useState<StrategyConfig>(() => defaultStrategy("momentum"));
+  const [live, setLive] = useState(false);
+  const [serverErrors, setServerErrors] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
-  const owner: string | null = isConnected && address ? address : demo ? DEMO_OWNER : null;
+  // The owner is the signed-in wallet. The demo owner is available outside production via ?owner=1.
+  const owner: string | null = session.signedIn && address ? session.address : demo && !isConnected ? DEMO_OWNER : null;
+  const usingDemo = owner === DEMO_OWNER && !session.signedIn;
 
   const check = useMemo(
     () => validateCreateInput({ name, ownerAddress: owner ?? "", config }),
     [name, owner, config],
   );
-  // The owner check is handled by the connect gate below, so drop it from the list.
-  const configErrors = check.ok ? [] : check.errors.filter((e) => !e.startsWith("ownerAddress"));
+  // The owner check is handled by the sign-in gate below, so drop it from the list.
+  const precheckErrors = check.ok ? [] : check.errors.filter((e) => !e.startsWith("ownerAddress"));
+  const errors = [...precheckErrors, ...serverErrors];
 
   const pickTemplate = (id: TemplateId) => {
     // Switching template resets the strategy but keeps the name and the chosen assets where valid.
     setConfig((prev) => ({ ...defaultStrategy(id), assets: prev.assets.length ? prev.assets : ["WETH"] }));
+    setServerErrors([]);
+  };
+
+  const updateConfig = (c: StrategyConfig) => {
+    setConfig(c);
+    setServerErrors([]);
   };
 
   const submit = async () => {
     if (!owner || !check.ok) return;
     setSubmitting(true);
+    setServerErrors([]);
     try {
-      const res = await postJson<{ id: string }>("/api/agents", { name: name.trim(), config, ownerAddress: owner });
-      toast({ title: "Agent created", description: "Fund it to start trading. It starts paused.", tone: "success" });
+      const res = await postJson<{ id: string; mode: "paper" | "live"; liveRequested: boolean }>("/api/agents", {
+        name: name.trim(),
+        config,
+        live,
+        demo: usingDemo,
+      });
+      const description =
+        res.liveRequested && res.mode !== "live"
+          ? "Created in paper mode: the server is not in live mode. Fund it to start trading."
+          : "Created paused. Fund it to start trading.";
+      toast({ title: "Agent created", description, tone: "success" });
       router.push(`/agents/${res.id}`);
     } catch (err) {
-      toast({ title: "Could not create agent", description: (err as Error).message, tone: "error" });
+      const details = err instanceof ApiClientError ? err.details : [];
+      setServerErrors(details.length ? details : [describeError(err)]);
+      toast({ title: "Could not create agent", description: describeError(err), tone: "error" });
       setSubmitting(false);
     }
   };
+
+  const needsSignIn = !!isConnected && !session.signedIn && !usingDemo;
 
   return (
     <div className="flex flex-col gap-3">
@@ -113,7 +143,19 @@ export function CreateWizard({ agents, demo }: { agents: AgentOption[]; demo: bo
       ) : (
         <div className="grid items-start gap-3 xl:grid-cols-[1fr_380px]">
           <div className="flex min-w-0 flex-col gap-3">
-            <ConfigForm config={config} onChange={setConfig} name={name} onName={setName} agents={agents} />
+            <ConfigForm
+              config={config}
+              onChange={updateConfig}
+              name={name}
+              onName={(n) => {
+                setName(n);
+                setServerErrors([]);
+              }}
+              agents={agents}
+              live={live}
+              onLive={setLive}
+              liveAvailable={liveAvailable}
+            />
           </div>
 
           <div className="flex flex-col gap-3 xl:sticky xl:top-16">
@@ -121,26 +163,34 @@ export function CreateWizard({ agents, demo }: { agents: AgentOption[]; demo: bo
               <SummaryPanel
                 name={name}
                 config={config}
-                ownerLabel={owner ? (demo && !isConnected ? "demo owner (?owner=1)" : owner) : null}
-                errors={configErrors}
+                ownerLabel={owner ? (usingDemo ? "demo owner (?owner=1)" : owner) : null}
+                mode={live && liveAvailable ? "live" : "paper"}
+                errors={errors}
               />
             </Panel>
             <div className="flex flex-col gap-2">
-              {!owner ? (
+              {!owner && !isConnected ? (
                 <div className="rounded-md border border-warn/40 bg-warn/10 px-3 py-2 text-[12px] text-warn">
                   Connect a wallet to create an agent. Or add ?owner=1 for the demo owner.
                 </div>
               ) : null}
-              <Button
-                variant="long"
-                className="h-9 w-full text-[13px]"
-                disabled={!owner || !check.ok || submitting}
-                onClick={submit}
-              >
-                {submitting ? "Creating…" : "Create agent"}
-              </Button>
+              {needsSignIn ? (
+                <Button variant="secondary" className="h-9 w-full text-[13px]" onClick={() => session.signIn().catch((e) => toast({ title: "Sign-in failed", description: describeError(e), tone: "error" }))}>
+                  Sign in with your wallet
+                </Button>
+              ) : (
+                <Button
+                  variant="long"
+                  className="h-9 w-full text-[13px]"
+                  disabled={!owner || !check.ok || submitting}
+                  onClick={submit}
+                >
+                  {submitting ? "Creating…" : "Create agent"}
+                </Button>
+              )}
               <p className="text-[11px] text-muted">
-                Creating provisions a server wallet and a 0G key, registers the agent onchain, then you fund it with a few USDC.
+                Creates a paused agent owned by your wallet. Paper by default. The trading wallet and onchain registration
+                are not provisioned yet, so funding and forking wait for that step.
               </p>
             </div>
           </div>

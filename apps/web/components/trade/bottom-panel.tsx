@@ -1,13 +1,20 @@
 "use client";
 
+import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
+import { useAccount } from "wagmi";
 
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, type TabItem } from "@/components/ui/tabs";
 import { useToast } from "@/components/ui/toast";
 import { EmptyRow, TD, TH, THead, TR, Table } from "@/components/ui/table";
-import type { TradingActivity } from "@/lib/data";
+import { getJson } from "@/lib/api";
 import { fmtAmount, fmtDateTime, fmtUsd, pnlClass, shortHash, txUrl } from "@/lib/format";
+import { usePlatform } from "@/lib/hooks/use-platform";
+import { useSession } from "@/lib/hooks/use-session";
+import { usePaperFills } from "@/lib/paper-fills";
+import type { Balance, Fill, OpenOrder, TradingActivity } from "@/lib/types";
 
 type BottomTab = "orders" | "fills" | "balances";
 
@@ -17,14 +24,53 @@ const TABS: TabItem<BottomTab>[] = [
   { value: "balances", label: "Balances" },
 ];
 
-/** Open orders, fills and balances. Mock data until the wallet is connected to Flash. */
+type LiveActivity = TradingActivity & { live: boolean };
+
+/**
+ * Open orders, fills and balances. With a signed-in wallet and Flash live, this polls Flash every 5 s.
+ * Paper fills are always labelled as simulated. Without a wallet it shows the demo rows.
+ */
 export function BottomPanel({ activity }: { activity: TradingActivity }) {
   const [tab, setTab] = useState<BottomTab>("orders");
   const toast = useToast();
+  const { address } = useAccount();
+  const session = useSession({ prompt: false });
+  const platform = usePlatform();
+  const paper = usePaperFills();
+
+  const funder = session.signedIn ? session.address : null;
+  const live = useQuery({
+    queryKey: ["flash-activity", funder],
+    queryFn: () => getJson<LiveActivity>(`/api/flash/orders?funder=${funder}`),
+    enabled: funder !== null && platform.data?.flashLive === true,
+    refetchInterval: 5000,
+  });
+
+  let openOrders: OpenOrder[] = [];
+  let fills: Fill[] = paper;
+  let balances: Balance[] = [];
+  let note: string | null = null;
+
+  if (funder && live.data?.live) {
+    openOrders = live.data.openOrders;
+    fills = [...live.data.fills, ...paper];
+    balances = live.data.balances;
+  } else if (funder) {
+    note = "Paper mode: live orders and balances need EXECUTION_MODE=live and a Flash key. Simulated fills are listed below.";
+  } else if (address) {
+    note = "Sign in with your wallet to load your Flash orders, fills and balances.";
+  } else {
+    openOrders = activity.openOrders;
+    fills = [...paper, ...activity.fills];
+    balances = activity.balances;
+    note = activity.source === "demo" ? "Demo data. Connect a wallet to see your Flash activity." : null;
+  }
+
   return (
     <section className="flex min-w-0 flex-col rounded-md border border-border bg-panel" aria-label="Account activity">
-      <div className="px-3">
+      <div className="flex items-center justify-between px-3">
         <Tabs value={tab} items={TABS} onChange={setTab} className="border-b-0" />
+        {note ? <span className="max-w-md truncate text-[11px] text-muted" title={note}>{note}</span> : null}
       </div>
       <div className="overflow-x-auto border-t border-border">
         {tab === "orders" ? (
@@ -42,8 +88,8 @@ export function BottomPanel({ activity }: { activity: TradingActivity }) {
               </tr>
             </THead>
             <tbody>
-              {activity.openOrders.length === 0 ? <EmptyRow colSpan={8}>No open orders.</EmptyRow> : null}
-              {activity.openOrders.map((o) => (
+              {openOrders.length === 0 ? <EmptyRow colSpan={8}>No open orders.</EmptyRow> : null}
+              {openOrders.map((o) => (
                 <TR key={o.id}>
                   <TD className="text-muted">{fmtDateTime(o.ts)}</TD>
                   <TD>{o.asset}</TD>
@@ -56,7 +102,7 @@ export function BottomPanel({ activity }: { activity: TradingActivity }) {
                     <Button
                       size="sm"
                       variant="ghost"
-                      onClick={() => toast({ title: "Cancel coming soon", description: "Needs a signed Flash cancel." })}
+                      onClick={() => toast({ title: "Cancel not wired yet", description: "Needs a signed Flash cancel message." })}
                     >
                       Cancel
                     </Button>
@@ -81,10 +127,10 @@ export function BottomPanel({ activity }: { activity: TradingActivity }) {
               </tr>
             </THead>
             <tbody>
-              {activity.fills.length === 0 ? <EmptyRow colSpan={7}>No fills yet.</EmptyRow> : null}
-              {activity.fills.map((f) => (
+              {fills.length === 0 ? <EmptyRow colSpan={7}>No fills yet.</EmptyRow> : null}
+              {fills.map((f) => (
                 <TR key={f.id}>
-                  <TD className="text-muted">{fmtDateTime(f.ts)}</TD>
+                  <TD className="text-muted">{f.ts ? fmtDateTime(f.ts) : "-"}</TD>
                   <TD>{f.asset}</TD>
                   <TD className={f.side === "buy" ? "text-long" : "text-short"}>{f.side}</TD>
                   <TD align="right">{fmtUsd(f.sizeUsd)}</TD>
@@ -93,9 +139,13 @@ export function BottomPanel({ activity }: { activity: TradingActivity }) {
                     {fmtUsd(f.feeUsd, 4)}
                   </TD>
                   <TD>
-                    <a href={txUrl(f.txHash)} target="_blank" rel="noreferrer" className="text-link hover:underline">
-                      {shortHash(f.txHash)}
-                    </a>
+                    {f.txHash ? (
+                      <a href={txUrl(f.txHash)} target="_blank" rel="noreferrer" className="text-link hover:underline">
+                        {shortHash(f.txHash)}
+                      </a>
+                    ) : (
+                      <Badge tone="warn">simulated</Badge>
+                    )}
                   </TD>
                 </TR>
               ))}
@@ -113,7 +163,8 @@ export function BottomPanel({ activity }: { activity: TradingActivity }) {
               </tr>
             </THead>
             <tbody>
-              {activity.balances.map((b) => (
+              {balances.length === 0 ? <EmptyRow colSpan={3}>No balances to show.</EmptyRow> : null}
+              {balances.map((b) => (
                 <TR key={b.symbol}>
                   <TD>{b.symbol}</TD>
                   <TD align="right">{fmtAmount(b.amount, 6)}</TD>

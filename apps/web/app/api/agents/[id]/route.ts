@@ -1,12 +1,14 @@
 import { NextResponse } from "next/server";
 
 import { getAgent } from "@/lib/data";
+import { ApiError, route } from "@/lib/server/errors";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+/** Public agent record. Owner-only data lives under sub-routes. */
+export const GET = route(async (_req: Request, { params }: { params: Promise<{ id: string }> }) => {
   const { id } = await params;
   const agent = await getAgent(id);
-  if (!agent) return NextResponse.json({ error: "agent not found" }, { status: 404 });
+  if (!agent) throw new ApiError(404, "NOT_FOUND", "Agent not found");
   return NextResponse.json(agent);
-}
+});

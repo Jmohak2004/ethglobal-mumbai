@@ -34,6 +34,7 @@ export function AgentHeader({
   const card: ShareCard = {
     id: agent.id,
     name: agent.name,
+    templateId: agent.config.template,
     templateName,
     pnlPct: stats.realizedPnlPct,
     pnlUsd: stats.realizedPnlUsd,
@@ -83,6 +84,7 @@ export function AgentHeader({
       <div className="flex items-center gap-2">
         <ShareCardButton card={card} />
         <ForkButton
+          agentId={agent.id}
           forkable={agent.config.fork.forkable}
           priceUsd={agent.config.fork.priceUsd}
           creatorPct={100 - platformPct}

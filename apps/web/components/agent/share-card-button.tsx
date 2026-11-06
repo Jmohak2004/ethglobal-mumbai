@@ -1,16 +1,21 @@
 "use client";
 
+import type { TemplateId } from "@arena/shared";
 import { useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { useToast } from "@/components/ui/toast";
+import { describeError, postJson } from "@/lib/api";
 import { fmtPct, pnlClass } from "@/lib/format";
+import { zgKeyHeaders } from "@/lib/user-keys";
+import type { ShareCardResult } from "@/lib/types";
 
 export interface ShareCard {
   id: string;
   name: string;
+  templateId: TemplateId;
   templateName: string;
   pnlPct: number;
   pnlUsd: number;
@@ -20,7 +25,7 @@ export interface ShareCard {
   verified: boolean;
 }
 
-/** Stats-only share card (no trade details, per PRD 6.9). Image is a local SVG until 0G image generation lands. */
+/** Stats-only share card (no trade details, PRD 6.9). Standard SVG card; "Generate AI card" renders the 0G image. */
 export function ShareCardButton({ card }: { card: ShareCard }) {
   const [open, setOpen] = useState(false);
   return (
@@ -55,12 +60,45 @@ function cardSvg(card: ShareCard): string {
 
 function ShareCardBody({ card }: { card: ShareCard }) {
   const toast = useToast();
+  const [ai, setAi] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
   const url = `${window.location.origin}/agents/${card.id}`;
   const text = `${card.name} on ARENA: ${fmtPct(card.pnlPct, 2, true)} PnL, ${card.winRatePct.toFixed(1)}% win rate, ${card.trades} trades${card.rank ? `, #${card.rank} on the leaderboard` : ""}. Verified by Chainlink CRE.`;
   const xHref = `https://x.com/intent/post?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}`;
   const tgHref = `https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`;
 
+  const generate = async () => {
+    setBusy(true);
+    try {
+      const res = await postJson<ShareCardResult>(
+        "/api/ai/sharecard",
+        {
+          name: card.name,
+          pnlPct: card.pnlPct,
+          winRateBps: Math.round(card.winRatePct * 100),
+          rank: card.rank ?? 0,
+          template: card.templateId,
+          verified: card.verified,
+        },
+        zgKeyHeaders(),
+      );
+      setAi(res.image);
+    } catch (err) {
+      toast({ title: "AI card unavailable", description: `${describeError(err)}. Showing the standard card.`, tone: "error" });
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const download = () => {
+    if (ai) {
+      const a = document.createElement("a");
+      a.href = ai;
+      a.download = `${card.id}-card.png`;
+      a.click();
+      toast({ title: "Card downloaded", tone: "success" });
+      return;
+    }
     const blob = new Blob([cardSvg(card)], { type: "image/svg+xml" });
     const href = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -73,36 +111,39 @@ function ShareCardBody({ card }: { card: ShareCard }) {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-col gap-4 rounded-md border border-border bg-bg p-4">
-        <div className="flex items-center justify-between">
-          <span className="text-[12px] font-semibold tracking-[0.25em]">ARENA</span>
-          {card.verified ? <Badge tone="link">✓ CRE</Badge> : null}
-        </div>
-        <div>
-          <div className="text-[22px] font-semibold">{card.name}</div>
-          <div className="text-[12px] text-muted">
-            {card.templateName}
-            {card.rank ? ` · #${card.rank}` : ""}
+      {ai ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={ai} alt={`${card.name} share card`} className="w-full rounded-md border border-border" />
+      ) : (
+        <div className="flex flex-col gap-4 rounded-md border border-border bg-bg p-4">
+          <div className="flex items-center justify-between">
+            <span className="text-[12px] font-semibold tracking-[0.25em]">ARENA</span>
+            {card.verified ? <Badge tone="link">✓ CRE</Badge> : null}
           </div>
-        </div>
-        <div className="grid grid-cols-3 gap-3">
           <div>
-            <div className="text-[10px] uppercase tracking-wider text-muted">PnL</div>
-            <div className={`num text-[24px] font-semibold ${pnlClass(card.pnlPct)}`}>
-              {fmtPct(card.pnlPct, 2, true)}
+            <div className="text-[22px] font-semibold">{card.name}</div>
+            <div className="text-[12px] text-muted">
+              {card.templateName}
+              {card.rank ? ` · #${card.rank}` : ""}
             </div>
           </div>
-          <div>
-            <div className="text-[10px] uppercase tracking-wider text-muted">Win rate</div>
-            <div className="num text-[24px] font-semibold">{card.winRatePct.toFixed(1)}%</div>
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-muted">PnL</div>
+              <div className={`num text-[24px] font-semibold ${pnlClass(card.pnlPct)}`}>{fmtPct(card.pnlPct, 2, true)}</div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-muted">Win rate</div>
+              <div className="num text-[24px] font-semibold">{card.winRatePct.toFixed(1)}%</div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-muted">Trades</div>
+              <div className="num text-[24px] font-semibold">{card.trades}</div>
+            </div>
           </div>
-          <div>
-            <div className="text-[10px] uppercase tracking-wider text-muted">Trades</div>
-            <div className="num text-[24px] font-semibold">{card.trades}</div>
-          </div>
+          <div className="text-[10.5px] text-muted">Stats only. Verified by Chainlink CRE. No trade details.</div>
         </div>
-        <div className="text-[10.5px] text-muted">Stats only. Verified by Chainlink CRE. No trade details.</div>
-      </div>
+      )}
       <div className="flex flex-wrap items-center gap-2">
         <a
           href={xHref}
@@ -120,6 +161,9 @@ function ShareCardBody({ card }: { card: ShareCard }) {
         >
           Telegram
         </a>
+        <Button variant="secondary" disabled={busy} onClick={generate}>
+          {busy ? "Generating…" : ai ? "Regenerate" : "Generate AI card"}
+        </Button>
         <Button onClick={download}>Download image</Button>
       </div>
     </div>
