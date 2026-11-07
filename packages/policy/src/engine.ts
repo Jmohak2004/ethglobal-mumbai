@@ -419,7 +419,9 @@ export function evaluate(proposal: Proposal, ctx: PolicyContext, opts: EvaluateO
   };
   if (limitPrice !== undefined) order.limitPrice = limitPrice;
   if (triggerPrice !== undefined) order.triggerPrice = triggerPrice;
-  if (trailPercent !== undefined) order.trailPercent = trailPercent;
+  // OrderIntent.trailPercent is a percent (2 = 2%), the unit the web ticket and the Flash client use; the
+  // Flash client converts it to Flash's fraction. The engine works in fractions, hence the x100.
+  if (trailPercent !== undefined) order.trailPercent = Number((trailPercent * 100).toFixed(6));
   if (twap) order.twap = twap;
   if (attachedBracket) order.attachedBracket = attachedBracket;
 

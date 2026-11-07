@@ -320,14 +320,14 @@ describe("evaluate: price bands, TWAP and trailing stops", () => {
   test("trailPct is converted to a Flash trail fraction", () => {
     const v = evaluate(sell({ orderType: "trailing-stop", trailPct: 2 }), makeCtx("momentum"));
     expect(v.kind === "approve" || v.kind === "clamp").toBe(true);
-    if (v.kind === "approve" || v.kind === "clamp") expect(v.order.trailPercent).toBeCloseTo(0.02, 9);
+    if (v.kind === "approve" || v.kind === "clamp") expect(v.order.trailPercent).toBeCloseTo(2, 9);
   });
 
   test("trailPct above the platform bound is clamped to 10% (0.1 fraction)", () => {
     const v = evaluate(sell({ orderType: "trailing-stop", trailPct: 50 }), makeCtx("momentum"));
     expect(v.kind).toBe("clamp");
     if (v.kind !== "clamp") return;
-    expect(v.order.trailPercent).toBeCloseTo(0.1, 9);
+    expect(v.order.trailPercent).toBeCloseTo(10, 9);
   });
 });
 
