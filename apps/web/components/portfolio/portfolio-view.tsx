@@ -23,7 +23,7 @@ import { SkeletonRows } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
 import { describeError, getJson, postJson } from "@/lib/api";
 import { CONTRACTS } from "@/lib/contracts";
-import { fmtBps, fmtNum, fmtPct, fmtUsd, fmtUsdSigned, pnlClass, shortAddr } from "@/lib/format";
+import { fmtBps, fmtNum, fmtPct, fmtUsd, fmtPnlBreakdown, fmtPnlUsd, pnlClass, shortAddr } from "@/lib/format";
 import { usePlatform } from "@/lib/hooks/use-platform";
 import { useSession } from "@/lib/hooks/use-session";
 import { fundOnchain, NotDeployedError, withdrawOnchain } from "@/lib/onchain";
@@ -88,7 +88,7 @@ export function PortfolioView() {
   }
 
   const list = agents.data ?? [];
-  const totalPnl = list.reduce((sum, a) => sum + (a.stats?.realizedPnlUsd ?? 0), 0);
+  const totalPnl = list.reduce((sum, a) => sum + (a.stats?.totalPnlUsd ?? 0), 0);
   const totalWithdrawable = list.reduce((sum, a) => sum + a.withdrawableUsd, 0);
 
   return (
@@ -111,7 +111,7 @@ export function PortfolioView() {
       {canList && agents.isSuccess ? (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <StatCard label="Agents" value={String(list.length)} sub={`${list.filter((a) => a.status === "active").length} active`} />
-          <StatCard label="Total profit" value={fmtUsdSigned(totalPnl)} tone={totalPnl >= 0 ? "long" : "short"} sub="Across all your agents" />
+          <StatCard label="Total profit" value={fmtPnlUsd(totalPnl)} tone={totalPnl >= 0 ? "long" : "short"} sub="Across all your agents, open positions included" />
           <StatCard label="Ready to withdraw" value={fmtUsd(totalWithdrawable, 2)} sub="Earned commission" />
         </div>
       ) : null}
@@ -213,7 +213,7 @@ function MyAgents({ agents, demo }: { agents: OwnedAgent[]; demo: boolean }) {
       <ul className="flex flex-col gap-3">
         {agents.map((a) => {
           const tpl = getTemplate(a.config.template);
-          const pnl = a.stats?.realizedPnlUsd ?? 0;
+          const pnl = a.stats?.totalPnlUsd ?? 0;
           const noWallet = a.tradingWallet === UNPROVISIONED;
           return (
             <li key={a.id} className="rounded-xl border border-border bg-panel p-4 shadow-[var(--shadow-card)] sm:p-5">
@@ -236,7 +236,14 @@ function MyAgents({ agents, demo }: { agents: OwnedAgent[]; demo: boolean }) {
               </div>
 
               <dl className="mt-4 grid grid-cols-2 gap-3 rounded-lg bg-panel-2 p-3 sm:grid-cols-4">
-                <Fact label="Profit" value={<span className={pnlClass(pnl)}>{fmtUsdSigned(pnl)}</span>} />
+                <Fact
+                  label="Profit"
+                  value={
+                    <span className={pnlClass(pnl)} title={a.stats ? fmtPnlBreakdown(a.stats) : undefined}>
+                      {fmtPnlUsd(pnl)}
+                    </span>
+                  }
+                />
                 <Fact label="Funds" value={fmtUsd(a.allocationUsd)} />
                 <Fact label="AI credit" value={<Pill tone={TIER_TONE[a.budgetTier]}>{TIER_LABEL[a.budgetTier]}</Pill>} />
                 <Fact label="Can withdraw" value={fmtUsd(a.withdrawableUsd, 2)} />
@@ -399,8 +406,9 @@ function HumanCard({
         ) : stats ? (
           <dl className="num grid grid-cols-2 gap-y-2 text-sm [&_dt]:font-sans">
             <dt className="font-sans text-muted">Return</dt>
-            <dd className={`text-right ${pnlClass(stats.realizedPnlPct)}`}>
-              {fmtPct(stats.realizedPnlPct, 2, true)} · {fmtUsdSigned(stats.realizedPnlUsd)}
+            <dd className={`text-right ${pnlClass(stats.totalPnlPct)}`}>
+              {fmtPct(stats.totalPnlPct, 2, true)} · {fmtPnlUsd(stats.totalPnlUsd)}
+              <div className="num text-xs text-muted">{fmtPnlBreakdown(stats)}</div>
             </dd>
             <dt className="font-sans text-muted">Win rate</dt>
             <dd className="text-right">{fmtBps(stats.winRateBps)}</dd>

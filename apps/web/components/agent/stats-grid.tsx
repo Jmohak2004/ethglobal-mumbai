@@ -5,7 +5,7 @@ import { useState } from "react";
 
 import { IconChevronDown } from "@/components/ui/icons";
 import { StatCard } from "@/components/ui/stat-card";
-import { fmtBps, fmtNum, fmtPct, fmtUsdSigned } from "@/lib/format";
+import { fmtBps, fmtNum, fmtPct, fmtPnlBreakdown, fmtPnlUsd } from "@/lib/format";
 
 /** Public stats only (free tier). Four headline numbers, the rest one click away. */
 export function StatsGrid({ stats }: { stats: PerformanceStats }) {
@@ -16,15 +16,16 @@ export function StatsGrid({ stats }: { stats: PerformanceStats }) {
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <StatCard
           label="Return"
-          value={fmtPct(stats.realizedPnlPct, 2, true)}
-          tone={stats.realizedPnlPct >= 0 ? "long" : "short"}
-          help="Profit from closed trades as a share of starting funds."
+          value={fmtPct(stats.totalPnlPct, 2, true)}
+          tone={stats.totalPnlPct >= 0 ? "long" : "short"}
+          help="Total profit (closed trades plus open positions at the live price) as a share of starting funds."
         />
         <StatCard
           label="Profit"
-          value={fmtUsdSigned(stats.realizedPnlUsd)}
-          tone={stats.realizedPnlUsd >= 0 ? "long" : "short"}
-          help="Realized profit or loss in US dollars."
+          value={fmtPnlUsd(stats.totalPnlUsd)}
+          tone={stats.totalPnlUsd >= 0 ? "long" : "short"}
+          sub={fmtPnlBreakdown(stats)}
+          help="Total profit or loss in US dollars: realized from closed trades plus open positions at the live price. Only the realized part is attested onchain."
         />
         <StatCard label="Win rate" value={fmtBps(stats.winRateBps)} help="How often a closed trade made money." />
         <StatCard

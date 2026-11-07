@@ -312,6 +312,9 @@ function statsFor(s: Seed, tf: Timeframe, now: number): PerformanceStats {
     template: s.template,
     realizedPnlUsd: round((s.allocationUsd * pnlPct) / 100, 2),
     realizedPnlPct: round(pnlPct, 2),
+    unrealizedPnlUsd: 0,
+    totalPnlUsd: round((s.allocationUsd * pnlPct) / 100, 2),
+    totalPnlPct: round(pnlPct, 2),
     volumeUsd: round(trades * AVG_TRADE_USD, 2),
     trades,
     winRateBps: s.winRateBps,
@@ -429,7 +432,7 @@ export async function getLeaderboard(q: LeaderboardQuery = {}): Promise<Performa
       (mode === "all" || s.mode === mode),
   )
     .map((s) => statsFor(s, tf, now))
-    .sort((a, b) => b.realizedPnlPct - a.realizedPnlPct);
+    .sort((a, b) => b.totalPnlPct - a.totalPnlPct);
 }
 
 export async function getAgent(id: string): Promise<Agent | null> {

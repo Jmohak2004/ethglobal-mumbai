@@ -22,6 +22,16 @@ export function fmtUsdSigned(n: number, digits = 2): string {
   return `${sign}$${abs}`;
 }
 
+/** Signed dollars for PnL. Sub-cent amounts keep 4 decimals so a small open gain does not read as +$0.00. */
+export function fmtPnlUsd(n: number): string {
+  return fmtUsdSigned(n, n !== 0 && Math.abs(n) < 0.01 ? 4 : 2);
+}
+
+/** "realized +$0.00 · open +$0.12", the breakdown shown under a total PnL figure. */
+export function fmtPnlBreakdown(s: { realizedPnlUsd: number; unrealizedPnlUsd: number }): string {
+  return `realized ${fmtPnlUsd(s.realizedPnlUsd)} · open ${fmtPnlUsd(s.unrealizedPnlUsd)}`;
+}
+
 /** $1.2K / $3.40M for big volumes; small values fall back to fmtUsd. */
 export function fmtCompactUsd(n: number): string {
   const abs = Math.abs(n);

@@ -14,7 +14,7 @@ import { IconInfo, IconTrophy } from "@/components/ui/icons";
 import { Switch } from "@/components/ui/form";
 import { TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { Tooltip } from "@/components/ui/tooltip";
-import { fmtBps, fmtCompactUsd, fmtPct, fmtUsdSigned, pnlClass } from "@/lib/format";
+import { fmtBps, fmtCompactUsd, fmtPct, fmtPnlBreakdown, fmtPnlUsd, pnlClass } from "@/lib/format";
 import { getTemplate } from "@/lib/templates";
 
 type SortKey = "rank" | "name" | "pnlPct" | "pnlUsd" | "winRate" | "dd" | "hit" | "trades" | "volume" | "forks";
@@ -32,8 +32,8 @@ interface Col {
 const COLS: Col[] = [
   { key: "rank", label: "#", align: "left" },
   { key: "name", label: "Agent", align: "left" },
-  { key: "pnlPct", label: "Return", align: "right", help: "Profit as a share of the starting funds, after closed trades. The default ranking." },
-  { key: "pnlUsd", label: "Profit", align: "right", help: "Realized profit or loss in US dollars." },
+  { key: "pnlPct", label: "Return", align: "right", help: "Total profit (closed trades plus open positions at the live price) as a share of the starting funds. The default ranking." },
+  { key: "pnlUsd", label: "Profit", align: "right", help: "Total profit or loss in US dollars: realized from closed trades plus open positions at the live price." },
   { key: "winRate", label: "Win rate", align: "right", help: "How often a closed trade made money." },
   { key: "trades", label: "Trades", align: "right", help: "Number of trades made." },
   { key: "dd", label: "Worst dip", align: "right", help: "The biggest fall from a peak to a low. Smaller is steadier.", extra: true },
@@ -60,7 +60,7 @@ interface Row {
   rank: number;
 }
 
-/** Sortable leaderboard. Rank is fixed by the default ordering (return), not by the current sort. */
+/** Sortable leaderboard. Rank is fixed by the default ordering (total return), not by the current sort. */
 export function LeaderboardTable({ rows }: { rows: PerformanceStats[] }) {
   const router = useRouter();
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: "rank", dir: 1 });
@@ -76,9 +76,9 @@ export function LeaderboardTable({ rows }: { rows: PerformanceStats[] }) {
         case "name":
           return x.r.name.toLowerCase();
         case "pnlPct":
-          return x.r.realizedPnlPct;
+          return x.r.totalPnlPct;
         case "pnlUsd":
-          return x.r.realizedPnlUsd;
+          return x.r.totalPnlUsd;
         case "winRate":
           return x.r.winRateBps;
         case "dd":
@@ -215,11 +215,12 @@ export function LeaderboardTable({ rows }: { rows: PerformanceStats[] }) {
                       {tpl ? <Badge>{tpl.name}</Badge> : <Badge tone="accent">Human</Badge>}
                     </div>
                   </TD>
-                  <TD align="right" className={clsx("font-medium", pnlClass(r.realizedPnlPct))}>
-                    {fmtPct(r.realizedPnlPct, 2, true)}
+                  <TD align="right" className={clsx("font-medium", pnlClass(r.totalPnlPct))}>
+                    {fmtPct(r.totalPnlPct, 2, true)}
                   </TD>
-                  <TD align="right" className={pnlClass(r.realizedPnlUsd)}>
-                    {fmtUsdSigned(r.realizedPnlUsd)}
+                  <TD align="right" className={pnlClass(r.totalPnlUsd)}>
+                    {fmtPnlUsd(r.totalPnlUsd)}
+                    <div className="num text-xs font-normal text-muted">{fmtPnlBreakdown(r)}</div>
                   </TD>
                   <TD align="right">{fmtBps(r.winRateBps)}</TD>
                   <TD align="right">{r.trades}</TD>
@@ -283,8 +284,9 @@ function MobileCard({ r, rank }: { r: PerformanceStats; rank: number }) {
           title
         )}
         <div className="text-right">
-          <div className={clsx("num text-xl font-medium", pnlClass(r.realizedPnlPct))}>{fmtPct(r.realizedPnlPct, 2, true)}</div>
-          <div className={clsx("num text-xs", pnlClass(r.realizedPnlUsd))}>{fmtUsdSigned(r.realizedPnlUsd)}</div>
+          <div className={clsx("num text-xl font-medium", pnlClass(r.totalPnlPct))}>{fmtPct(r.totalPnlPct, 2, true)}</div>
+          <div className={clsx("num text-xs", pnlClass(r.totalPnlUsd))}>{fmtPnlUsd(r.totalPnlUsd)}</div>
+          <div className="num text-[11px] text-muted">{fmtPnlBreakdown(r)}</div>
         </div>
       </div>
       <dl className="grid grid-cols-3 gap-2 rounded-lg bg-panel-2 px-3 py-2 text-center">

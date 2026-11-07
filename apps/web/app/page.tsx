@@ -31,7 +31,7 @@ async function loadLiveStats(): Promise<LiveStats | null> {
           id: r.entityId,
           name: r.name,
           template: r.template ? (getTemplate(r.template)?.name ?? r.template) : "Agent",
-          pnlPct: r.realizedPnlPct,
+          pnlPct: r.totalPnlPct,
           verified: r.verified !== null,
         })),
       };

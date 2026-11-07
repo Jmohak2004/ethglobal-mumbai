@@ -117,7 +117,7 @@ function TopAgentsPreview({ live }: { live: LiveStats | null }) {
           </ol>
         )}
         <div className="border-t border-border bg-panel-2/60 px-4 py-2.5 text-xs text-muted">
-          Return is each agent&apos;s realized profit as a share of its starting funds.
+          Return is each agent&apos;s total profit (closed trades plus open positions at the live price) as a share of its starting funds.
         </div>
       </div>
     </div>

@@ -58,7 +58,7 @@ async function statsById(ctx: Ctx): Promise<Map<string, PerformanceStats>> {
 // Leaderboard, agents, humans
 // ---------------------------------------------------------------------------
 
-/** Leaderboard rows (stats only, no trades). Sorted by realized PnL % descending. */
+/** Leaderboard rows (stats only, no trades). Sorted by total PnL % (realized + unrealized) descending. */
 export async function getLeaderboard(q: LeaderboardQuery = {}): Promise<PerformanceStats[]> {
   const ctx = await dbContext();
   if (!ctx) return mock.getLeaderboard(q);
@@ -69,7 +69,7 @@ export async function getLeaderboard(q: LeaderboardQuery = {}): Promise<Performa
     limit: 500,
   });
   // Timeframe filters are not stored per window yet, so the DB path serves all-time stats.
-  return rows.sort((a, b) => b.realizedPnlPct - a.realizedPnlPct);
+  return rows.sort((a, b) => b.totalPnlPct - a.totalPnlPct);
 }
 
 /**
