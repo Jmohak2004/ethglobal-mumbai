@@ -9,12 +9,12 @@ import { Button } from "@/components/ui/button";
 import { Tabs, type TabItem } from "@/components/ui/tabs";
 import { EmptyRow, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
-import { describeError, getJson } from "@/lib/api";
+import { describeError, getJson, postJson } from "@/lib/api";
 import { fmtAmount, fmtDateTime, fmtUsd, pnlClass, shortHash, txUrl } from "@/lib/format";
 import { usePlatform } from "@/lib/hooks/use-platform";
 import { useSession } from "@/lib/hooks/use-session";
 import { markPaperOrdersCancelled, usePaperCancelledOrders } from "@/lib/paper-orders";
-import { usePaperFills } from "@/lib/paper-fills";
+import { usePaperFills, usePaperServerFills } from "@/lib/paper-fills";
 import { cancelFlashOrders } from "@/lib/trade";
 import type { Balance, CancelResult, Fill, OpenOrder, TradingActivity } from "@/lib/types";
 
@@ -45,6 +45,8 @@ export function BottomPanel({ activity }: { activity: TradingActivity }) {
   const [busy, setBusy] = useState<string | null>(null);
 
   const funder = session.signedIn ? session.address : null;
+  // Saved paper fills (database) for the signed-in wallet. The local list only holds fills whose save failed.
+  const serverPaper = usePaperServerFills(funder);
   const live = useQuery({
     queryKey: ["flash-activity", funder],
     queryFn: () => getJson<LiveActivity>(`/api/flash/orders?funder=${funder}`),
@@ -59,10 +61,11 @@ export function BottomPanel({ activity }: { activity: TradingActivity }) {
 
   if (funder && live.data?.live) {
     openOrders = live.data.openOrders;
-    fills = [...live.data.fills, ...paper];
+    fills = [...live.data.fills, ...serverPaper, ...paper];
     balances = live.data.balances;
   } else if (funder) {
     note = "Paper mode: live orders and balances need EXECUTION_MODE=live and a Flash key. Simulated fills are listed below.";
+    fills = [...serverPaper, ...paper];
   } else if (address) {
     note = "Sign in with your wallet to load your Flash orders, fills and balances.";
   } else {
@@ -71,6 +74,7 @@ export function BottomPanel({ activity }: { activity: TradingActivity }) {
     balances = activity.balances;
     note = activity.source === "demo" ? "Demo data. Connect a wallet to see your Flash activity." : null;
   }
+  fills = [...fills].sort((a, b) => b.ts - a.ts);
 
   // Live Flash rows are signed by the funder wallet. Demo and paper rows are only marked cancelled locally.
   const liveOrders = funder !== null && live.data?.live === true;
@@ -87,6 +91,14 @@ export function BottomPanel({ activity }: { activity: TradingActivity }) {
     };
     if (!liveOrders) {
       markLocal();
+      // A signed-in user's paper orders that exist in the database are marked cancelled there too. Nothing goes to Flash.
+      if (funder !== null) {
+        try {
+          await postJson("/api/paper/orders/cancel", { orderIds: ids });
+        } catch {
+          // Not saved (for example the database is unavailable). The local mark above still applies for this page.
+        }
+      }
       return;
     }
     setBusy(label);

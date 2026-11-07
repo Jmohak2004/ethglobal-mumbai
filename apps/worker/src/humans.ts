@@ -1,6 +1,7 @@
-// Humans board (PRD 6.13). Users who opted in are ranked on their own Flash fills. Each run syncs their orders by
-// funder address, then recomputes their PerformanceStats (kind "human") with the same FIFO PnL the agents use.
-// Human orders have no agent (agentId null), so they never feed an agent's decisions.
+// Humans board (PRD 6.13). Users who opted in are ranked on their own Flash fills and on their paper fills saved from
+// the web terminal. Each run syncs their Flash orders by funder address, then recomputes their PerformanceStats (kind
+// "human") with the same FIFO PnL the agents use. Human orders have no agent (agentId null), so they never feed an
+// agent's decisions.
 
 import { insertFills, listHumansOptedIn, upsertOrder, upsertStats, type Db, type StatsInput, type UserRecord } from "@arena/db";
 import { computeFifoPnl, OPEN_ORDER_STATUSES, type FlashClient } from "@arena/flash";
@@ -107,7 +108,8 @@ async function syncFunderOrders(opts: HumansOptions, funder: string): Promise<{ 
 
 /**
  * Recomputes the stats of every opted-in user from the stored orders and fills (no Flash calls). Returns the number
- * of rows written. Realized PnL is FIFO and net of fees. Win rate and drawdown follow computeFifoPnl. There is no
+ * of rows written. Paper fills are included and mark the row "paper" when all of them are simulated. Realized PnL is
+ * FIFO and net of fees. Win rate and drawdown follow computeFifoPnl. There is no
  * capital base for a human, so the PnL percentage is taken over total buy notional, and the forecast hit rate is 0.
  */
 export async function recomputeHumanStats(opts: { db: Db; clock: Clock; logger?: Logger }): Promise<number> {
@@ -116,7 +118,10 @@ export async function recomputeHumanStats(opts: { db: Db; clock: Clock; logger?:
   const rows: StatsInput[] = [];
 
   for (const user of users) {
-    const orders = await opts.db.query.orders.findMany({ where: (o, { eq }) => eq(o.funderAddress, user.address) });
+    // Human trades only: Flash orders synced for this funder, and paper fills saved from the terminal.
+    const orders = (
+      await opts.db.query.orders.findMany({ where: (o, { eq }) => eq(o.funderAddress, user.address) })
+    ).filter((o) => o.agentId === null);
     const ids = orders.map((o) => o.id);
     const fillRows =
       ids.length > 0 ? await opts.db.query.fills.findMany({ where: (f, { inArray }) => inArray(f.orderId, ids) }) : [];
@@ -124,13 +129,16 @@ export async function recomputeHumanStats(opts: { db: Db; clock: Clock; logger?:
     const fifo = computeFifoPnl(trades);
     const boughtUsd = trades.filter((t) => t.side === "buy").reduce((sum, t) => sum + t.notionalUsd, 0);
     const closing = fifo.wins + fifo.losses;
+    // Paper when there is at least one fill and every fill is simulated. A mix with live fills is live.
+    const paperOrderIds = new Set(orders.filter(isPaperOrder).map((o) => o.id));
+    const mode: StatsInput["mode"] =
+      fillRows.length > 0 && fillRows.every((f) => paperOrderIds.has(f.orderId)) ? "paper" : "live";
 
     rows.push({
       entityId: user.address,
       kind: "human",
       name: humanDisplayName(user),
       template: null,
-      mode: "live",
       realizedPnlUsd: fifo.realizedPnlUsd,
       realizedPnlPct: boughtUsd > 0 ? (fifo.realizedPnlUsd / boughtUsd) * 100 : 0,
       volumeUsd: fifo.volumeUsd,
@@ -139,6 +147,7 @@ export async function recomputeHumanStats(opts: { db: Db; clock: Clock; logger?:
       maxDrawdownBps: Math.round(fifo.maxDrawdownPct * 100),
       forecastHitRateBps: 0,
       daysActive: Math.max(0, Math.floor((now - user.createdAt) / DAY_MS)),
+      mode,
       updatedAt: now,
     });
   }
@@ -146,4 +155,9 @@ export async function recomputeHumanStats(opts: { db: Db; clock: Clock; logger?:
   await upsertStats(opts.db, rows);
   opts.logger?.info("humans stats recomputed", { users: users.length });
   return rows.length;
+}
+
+/** A simulated fill saved from the web terminal's paper mode. Never sent to Flash (orders.raw.paper). */
+export function isPaperOrder(order: { raw: Record<string, unknown> }): boolean {
+  return order.raw?.paper === true;
 }

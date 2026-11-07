@@ -60,6 +60,35 @@ function quotes(): Map<string, StoredQuote> {
   return g[QUOTES_KEY] as Map<string, StoredQuote>;
 }
 
+/** Paper quotes the server issued, so a paper fill can only be recorded at the price Flash actually quoted. */
+export interface StoredPaperQuote {
+  funder: string;
+  side: "buy" | "sell";
+  asset: string;
+  orderType: TicketInput["orderType"];
+  notionalUsd: number;
+  priceUsd: number;
+  feeUsd: number;
+  createdAt: number;
+}
+const PAPER_QUOTES_KEY = "__arenaPaperQuotes";
+function paperQuotes(): Map<string, StoredPaperQuote> {
+  const g = globalThis as Record<string, unknown>;
+  if (!g[PAPER_QUOTES_KEY]) g[PAPER_QUOTES_KEY] = new Map<string, StoredPaperQuote>();
+  return g[PAPER_QUOTES_KEY] as Map<string, StoredPaperQuote>;
+}
+
+/** Single use: returns the server-issued paper quote for this wallet and forgets it. */
+export function consumePaperQuote(quoteId: string, funder: string): StoredPaperQuote {
+  const store = paperQuotes();
+  for (const [id, q] of store) if (Date.now() - q.createdAt > QUOTE_TTL_MS) store.delete(id);
+  const q = store.get(quoteId);
+  if (!q) throw new ApiError(404, "NOT_FOUND", "Paper quote not found or expired. Request a new quote.");
+  if (q.funder !== funder.toLowerCase()) throw new ApiError(403, "FORBIDDEN", "This quote belongs to another wallet");
+  store.delete(quoteId);
+  return q;
+}
+
 function takeQuote(quoteId: string, funder: string, remove: boolean): StoredQuote {
   const store = quotes();
   for (const [id, q] of store) if (Date.now() - q.createdAt > QUOTE_TTL_MS) store.delete(id);
@@ -181,6 +210,16 @@ async function paperQuote(ticket: TicketInput, funder: `0x${string}`, markPriceU
   const qty = Number(target.amount);
   const priceUsd = qty > 0 ? Number(contra.notional) / qty : markPriceUsd;
   const flashFeeUsd = Number(quote.fees.estimatedFeeNotional) || 0;
+  paperQuotes().set(quote.quoteId, {
+    funder: funder.toLowerCase(),
+    side: ticket.side,
+    asset: ticket.asset,
+    orderType: ticket.orderType,
+    notionalUsd: ticket.sizeUsd,
+    priceUsd,
+    feeUsd: integratorFeeUsd + flashFeeUsd,
+    createdAt: Date.now(),
+  });
   return {
     mode: "paper",
     notionalUsd: ticket.sizeUsd,

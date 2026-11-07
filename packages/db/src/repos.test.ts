@@ -3,10 +3,14 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { StrategyConfig } from "@arena/shared";
 import {
+  cancelPaperOrders,
   closeDb,
   createAgent,
   createDb,
   createTopup,
+  insertFills,
+  insertPaperFill,
+  listPaperFillsByFunder,
   createTopupIfAbsent,
   forecastHit,
   getChainCursor,
@@ -20,6 +24,7 @@ import {
   listRecentInsightItems,
   listTopupsByAgent,
   markStatsVerified,
+  upsertOrder,
   migrate,
   resolveForecast,
   setChainCursor,
@@ -305,5 +310,78 @@ describe("chain cursors", () => {
     await setChainCursor(db, "perf", 250);
     expect(await getChainCursor(db, "perf")).toBe(250);
     expect(await getChainCursor(db, "other")).toBeNull();
+  });
+});
+
+describe("paper fills (human manual trades in paper mode)", () => {
+  const WALLET = "0x00000000000000000000000000000000000000Aa";
+  const OTHER = "0x00000000000000000000000000000000000000bb";
+
+  test("insertPaperFill stores an agentless filled order and its fill, with qty = notional / price", async () => {
+    const { orderId, fillId } = await insertPaperFill(db, {
+      funderAddress: WALLET,
+      side: "buy",
+      asset: "WETH",
+      orderType: "limit",
+      notionalUsd: 10,
+      priceUsd: 2000,
+      feeUsd: 0.02,
+      integratorFeeUsd: 0.01,
+      quoteId: "q-1",
+      ts: 5_000,
+    });
+    expect(orderId.startsWith("paper_")).toBe(true);
+    const order = await db.query.orders.findFirst({ where: (o, { eq }) => eq(o.id, orderId) });
+    expect(order).toMatchObject({ agentId: null, funderAddress: WALLET.toLowerCase(), status: "filled", asset: "WETH" });
+    expect(order?.raw).toEqual({ paper: true, quoteId: "q-1" });
+    const fill = await db.query.fills.findFirst({ where: (f, { eq }) => eq(f.id, fillId) });
+    expect(fill).toMatchObject({ orderId, price: 2000, notionalUsd: 10, feeUsd: 0.02, integratorFeeUsd: 0.01, ts: 5_000, txId: null });
+    expect(fill?.qty).toBeCloseTo(0.005, 12);
+  });
+
+  test("insertPaperFill rejects a non-positive price", async () => {
+    await expect(
+      insertPaperFill(db, { funderAddress: WALLET, side: "buy", asset: "WETH", orderType: "market", notionalUsd: 1, priceUsd: 0, feeUsd: 0, integratorFeeUsd: 0 }),
+    ).rejects.toThrow("priceUsd");
+  });
+
+  test("listPaperFillsByFunder returns only this funder's paper fills, newest first, and skips live orders", async () => {
+    const early = await insertPaperFill(db, { funderAddress: WALLET, side: "buy", asset: "WETH", orderType: "market", notionalUsd: 1, priceUsd: 2000, feeUsd: 0, integratorFeeUsd: 0, ts: 1_000 });
+    const late = await insertPaperFill(db, { funderAddress: WALLET, side: "sell", asset: "cbBTC", orderType: "stop", notionalUsd: 2, priceUsd: 60000, feeUsd: 0, integratorFeeUsd: 0, ts: 2_000 });
+    await insertPaperFill(db, { funderAddress: OTHER, side: "buy", asset: "WETH", orderType: "market", notionalUsd: 1, priceUsd: 2000, feeUsd: 0, integratorFeeUsd: 0, ts: 3_000 });
+    await upsertOrder(db, {
+      id: "flash-live-1",
+      agentId: null,
+      funderAddress: WALLET,
+      side: "buy",
+      asset: "WETH",
+      orderType: "market",
+      notionalUsd: 1,
+      status: "ORDER_STATUS_FILLED",
+      raw: { paper: false },
+      createdAt: 4_000,
+      updatedAt: 4_000,
+    });
+    await insertFills(db, [{ id: "flash-live-1:0x1", orderId: "flash-live-1", price: 2000, qty: 0.0005, notionalUsd: 1, feeUsd: 0, integratorFeeUsd: 0, txId: "0x1", ts: 4_000 }]);
+
+    const rows = await listPaperFillsByFunder(db, WALLET);
+    expect(rows.map((r) => r.orderId)).toEqual([late.orderId, early.orderId]);
+    expect(rows[0]).toMatchObject({ side: "sell", asset: "cbBTC", orderType: "stop", price: 60000, notionalUsd: 2 });
+  });
+
+  test("cancelPaperOrders marks only this funder's open paper orders, and leaves filled and live orders alone", async () => {
+    const base = { agentId: null, side: "buy" as const, asset: "WETH", orderType: "limit" as const, notionalUsd: 1, createdAt: 1, updatedAt: 1 };
+    await upsertOrder(db, { ...base, id: "paper_open", funderAddress: WALLET, status: "open", raw: { paper: true } });
+    await upsertOrder(db, { ...base, id: "paper_other", funderAddress: OTHER, status: "open", raw: { paper: true } });
+    await upsertOrder(db, { ...base, id: "live_open", funderAddress: WALLET, status: "open", raw: { paper: false } });
+    const filled = await insertPaperFill(db, { funderAddress: WALLET, side: "buy", asset: "WETH", orderType: "market", notionalUsd: 1, priceUsd: 2000, feeUsd: 0, integratorFeeUsd: 0 });
+
+    const changed = await cancelPaperOrders(db, WALLET, ["paper_open", "paper_other", "live_open", filled.orderId], 9_000);
+    expect(changed).toEqual(["paper_open"]);
+    expect((await db.query.orders.findFirst({ where: (o, { eq }) => eq(o.id, "paper_open") }))).toMatchObject({ status: "cancelled", updatedAt: 9_000 });
+    expect((await db.query.orders.findFirst({ where: (o, { eq }) => eq(o.id, "paper_other") }))?.status).toBe("open");
+    expect((await db.query.orders.findFirst({ where: (o, { eq }) => eq(o.id, "live_open") }))?.status).toBe("open");
+    expect((await db.query.orders.findFirst({ where: (o, { eq }) => eq(o.id, filled.orderId) }))?.status).toBe("filled");
+    expect(await cancelPaperOrders(db, WALLET, [])).toEqual([]);
   });
 });

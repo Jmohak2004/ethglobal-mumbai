@@ -15,7 +15,7 @@ import type {
   StrategyConfig,
   TemplateId,
 } from "@arena/shared";
-import type { InferenceTrace } from "@arena/shared";
+import type { FlashOrderType, InferenceTrace } from "@arena/shared";
 import type { RiskReason } from "@arena/shared";
 import type {
   AgentRuntimeState,
@@ -26,6 +26,37 @@ import type {
 
 /** Opaque: the concrete type is @arena/db's Db (drizzle over postgres-js). */
 export type Db = unknown;
+
+/** Mirrors @arena/db PaperFillInput (repo/orders.ts). */
+export interface PaperFillInput {
+  funderAddress: string;
+  side: "buy" | "sell";
+  asset: string;
+  orderType: FlashOrderType;
+  notionalUsd: number;
+  priceUsd: number;
+  feeUsd: number;
+  integratorFeeUsd: number;
+  quoteId?: string | null;
+  ts?: number;
+}
+
+/** Mirrors @arena/db PaperFillRecord. `id` is the fill id. */
+export interface PaperFillRow {
+  id: string;
+  orderId: string;
+  price: number;
+  qty: number;
+  notionalUsd: number;
+  feeUsd: number;
+  integratorFeeUsd: number;
+  txId: string | null;
+  ts: number;
+  asset: string;
+  side: "buy" | "sell";
+  orderType: FlashOrderType;
+  funderAddress: string;
+}
 
 export interface Repo {
   createDb(opts: { url?: string }): Db;
@@ -115,6 +146,10 @@ export interface Repo {
     db: Db,
     input: { id?: string; level: RiskLevel; reasonCode: RiskReason; asOf: number; txHash?: string | null },
   ): Promise<string>;
+  // Paper fills from the web terminal (repo/orders.ts)
+  insertPaperFill(db: Db, input: PaperFillInput): Promise<{ orderId: string; fillId: string }>;
+  listPaperFillsByFunder(db: Db, funderAddress: string, limit?: number): Promise<PaperFillRow[]>;
+  cancelPaperOrders(db: Db, funderAddress: string, orderIds: string[], now?: number): Promise<string[]>;
 }
 
 let repoPromise: Promise<Repo> | undefined;

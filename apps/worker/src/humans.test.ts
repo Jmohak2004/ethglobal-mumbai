@@ -2,9 +2,9 @@
 // same FIFO PnL the agents use. Finished orders are not re-fetched. A Flash failure for one user does not stop the rest.
 
 import { afterAll, describe, expect, test } from "bun:test";
-import { closeDb, leaderboard, upsertUser, type Db } from "@arena/db";
+import { closeDb, insertFills, insertPaperFill, leaderboard, upsertOrder, upsertUser, type Db } from "@arena/db";
 import type { FlashClient } from "@arena/flash";
-import { humanDisplayName, recomputeHumanStats, syncHumans } from "./humans.ts";
+import { humanDisplayName, isPaperOrder, recomputeHumanStats, syncHumans } from "./humans.ts";
 import { silentLogger } from "./logger.ts";
 import { fixedClock, memoryDb, NOW } from "./test-fixtures.ts";
 
@@ -197,5 +197,105 @@ describe("humans board sync", () => {
     expect(humanDisplayName({ address: BOB, displayName: null })).toBe("0xbbbb...bbbb");
     expect(humanDisplayName({ address: BOB, displayName: "  " })).toBe("0xbbbb...bbbb");
     expect(humanDisplayName({ address: ALICE, displayName: "Alice" })).toBe("Alice");
+  });
+});
+
+describe("humans board paper fills", () => {
+  const DAVE = "0xdddddddddddddddddddddddddddddddddddddddd";
+  const EVE = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+  const FRANK = "0xffffffffffffffffffffffffffffffffffffffff";
+
+  async function paperDb(): Promise<Db> {
+    const db = await memoryDb();
+    dbs.push(db);
+    await upsertUser(db, { address: DAVE, displayName: "Dave", humansBoardOptIn: true, createdAt: NOW - 10 * 24 * HOUR });
+    await upsertUser(db, { address: EVE, displayName: "Eve", humansBoardOptIn: true, createdAt: NOW - 10 * 24 * HOUR });
+    await upsertUser(db, { address: FRANK, humansBoardOptIn: false, createdAt: NOW - 10 * 24 * HOUR });
+    return db;
+  }
+
+  /** Saves a paper round trip: buy 1 WETH at 2000 (fee 2), sell it at 2200 (fee 2.2). FIFO PnL is 195.8. */
+  async function saveRoundTrip(db: Db, funder: string): Promise<void> {
+    await insertPaperFill(db, {
+      funderAddress: funder,
+      side: "buy",
+      asset: "WETH",
+      orderType: "market",
+      notionalUsd: 2000,
+      priceUsd: 2000,
+      feeUsd: 2,
+      integratorFeeUsd: 2,
+      ts: NOW - 3 * HOUR,
+    });
+    await insertPaperFill(db, {
+      funderAddress: funder,
+      side: "sell",
+      asset: "WETH",
+      orderType: "limit",
+      notionalUsd: 2200,
+      priceUsd: 2200,
+      feeUsd: 2.2,
+      integratorFeeUsd: 2.2,
+      ts: NOW - HOUR,
+    });
+  }
+
+  const flashOpts = (db: Db, flash: ReturnType<typeof fakeFlash>) => ({
+    db,
+    flash: flash as unknown as Pick<FlashClient, "listAllOrders" | "getOrder">,
+    clock: fixedClock(),
+    logger: silentLogger,
+  });
+
+  test("paper fills saved in the database count toward the stats, and the row is labelled paper", async () => {
+    const db = await paperDb();
+    await saveRoundTrip(db, DAVE);
+    const flash = fakeFlash({ listed: {}, details: {} });
+
+    const result = await syncHumans(flashOpts(db, flash));
+    expect(result.statsRows).toBe(2);
+    const dave = (await leaderboard(db, { kind: "human" })).find((r) => r.entityId === DAVE);
+    expect(dave).toMatchObject({ name: "Dave", mode: "paper", trades: 2, volumeUsd: 4200, winRateBps: 10_000 });
+    expect(dave?.realizedPnlUsd).toBeCloseTo(195.8, 6);
+    expect((await leaderboard(db, { kind: "human", mode: "paper" })).map((r) => r.entityId)).toEqual([DAVE]);
+    expect((await leaderboard(db, { kind: "human", mode: "live" })).map((r) => r.entityId)).toEqual([EVE]);
+    expect((await leaderboard(db, { kind: "human" })).find((r) => r.entityId === FRANK)).toBeUndefined();
+
+    // A Flash outage for the user does not remove the paper fills from the stats.
+    flash.failFor.add(DAVE);
+    const retry = await syncHumans(flashOpts(db, flash));
+    expect(retry.failedUsers).toBe(1);
+    expect((await leaderboard(db, { kind: "human" })).find((r) => r.entityId === DAVE)).toMatchObject({ mode: "paper", trades: 2 });
+  });
+
+  test("a human with both live and paper fills is labelled live and counts both", async () => {
+    const db = await paperDb();
+    await saveRoundTrip(db, EVE);
+    await upsertOrder(db, {
+      id: "eve-live-1",
+      agentId: null,
+      funderAddress: EVE,
+      side: "buy",
+      asset: "WETH",
+      orderType: "market",
+      notionalUsd: 1500,
+      status: "ORDER_STATUS_FILLED",
+      raw: { orderId: "eve-live-1" },
+      createdAt: NOW - HOUR,
+      updatedAt: NOW - HOUR,
+    });
+    await insertFills(db, [
+      { id: "eve-live-1:0x09", orderId: "eve-live-1", price: 1500, qty: 1, notionalUsd: 1500, feeUsd: 1.5, integratorFeeUsd: 0, txId: "0x09", ts: NOW - HOUR },
+    ]);
+
+    expect(await recomputeHumanStats({ db, clock: fixedClock(), logger: silentLogger })).toBe(2);
+    const eve = (await leaderboard(db, { kind: "human" })).find((r) => r.entityId === EVE);
+    expect(eve).toMatchObject({ mode: "live", trades: 3, volumeUsd: 5700 });
+  });
+
+  test("isPaperOrder reads the paper flag stored on the order", () => {
+    expect(isPaperOrder({ raw: { paper: true } })).toBe(true);
+    expect(isPaperOrder({ raw: { paper: false } })).toBe(false);
+    expect(isPaperOrder({ raw: {} })).toBe(false);
   });
 });

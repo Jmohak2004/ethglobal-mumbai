@@ -2,6 +2,7 @@
 
 import { clsx } from "clsx";
 import { useConnectModal } from "@rainbow-me/rainbowkit";
+import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useAccount, useChainId, useSendTransaction, useSignTypedData, useSwitchChain } from "wagmi";
 import { waitForTransactionReceipt } from "wagmi/actions";
@@ -14,7 +15,7 @@ import { describeError } from "@/lib/api";
 import { fmtAmount, fmtUsd } from "@/lib/format";
 import { usePlatform } from "@/lib/hooks/use-platform";
 import { useSession } from "@/lib/hooks/use-session";
-import { addPaperFill } from "@/lib/paper-fills";
+import { PAPER_FILLS_QUERY_KEY, addPaperFill, savePaperFill } from "@/lib/paper-fills";
 import { CHAIN } from "@/lib/contracts";
 import { executeLiveTrade, fetchQuote, type LiveQuote, type WalletOps } from "@/lib/trade";
 import { DEMO_CAPS, FLASH_INTEGRATOR_FEE_BPS } from "@/lib/templates";
@@ -53,6 +54,7 @@ export function OrderTicket({
   prefill: TicketPrefill | null;
 }) {
   const toast = useToast();
+  const qc = useQueryClient();
   const platform = usePlatform();
   const session = useSession({ prompt: false });
   const { address } = useAccount();
@@ -134,8 +136,34 @@ export function OrderTicket({
 
   const confirm = async (q: TradeQuote) => {
     if (q.mode === "paper") {
-      addPaperFill({ ts: Date.now(), asset, side, sizeUsd: size, priceUsd: q.priceUsd, feeUsd: q.feeUsd, txHash: null });
-      toast({ title: "Simulated fill (paper mode)", description: `Not sent to Flash. Mark ${fmtAmount(q.priceUsd, 2)}.` });
+      setBusy("Recording simulated fill");
+      try {
+        await savePaperFill({
+          side,
+          asset,
+          orderType: type,
+          notionalUsd: q.notionalUsd,
+          priceUsd: q.priceUsd,
+          feeUsd: q.feeUsd,
+          ...(q.quoteId ? { quoteId: q.quoteId } : {}),
+        });
+        await qc.invalidateQueries({ queryKey: PAPER_FILLS_QUERY_KEY });
+        toast({
+          title: "Simulated fill saved",
+          description: `Recorded to your account. Not sent to Flash. Mark ${fmtAmount(q.priceUsd, 2)}.`,
+          tone: "success",
+        });
+      } catch (err) {
+        // No session or no database: keep the fill in this page session so the user still sees it.
+        addPaperFill({ ts: Date.now(), asset, side, sizeUsd: q.notionalUsd, priceUsd: q.priceUsd, feeUsd: q.feeUsd, txHash: null });
+        toast({
+          title: "Simulated fill kept in this browser",
+          description: `Not saved to your account: ${describeError(err)}. Not sent to Flash.`,
+          tone: "error",
+        });
+      } finally {
+        setBusy(null);
+      }
       setQuote(null);
       return;
     }
