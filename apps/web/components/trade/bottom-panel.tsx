@@ -10,7 +10,7 @@ import { Tabs, type TabItem } from "@/components/ui/tabs";
 import { EmptyRow, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
 import { describeError, getJson, postJson } from "@/lib/api";
-import { fmtAmount, fmtDateTime, fmtUsd, pnlClass, shortHash, txUrl } from "@/lib/format";
+import { fmtAmount, fmtDateTime, fmtUsd, journalTxUrl, liveTxUrl, pnlClass } from "@/lib/format";
 import { usePlatform } from "@/lib/hooks/use-platform";
 import { useSession } from "@/lib/hooks/use-session";
 import { markPaperOrdersCancelled, usePaperCancelledOrders } from "@/lib/paper-orders";
@@ -221,9 +221,17 @@ export function BottomPanel({ activity }: { activity: TradingActivity }) {
                   </TD>
                   <TD>
                     {f.txHash ? (
-                      <a href={txUrl(f.txHash)} target="_blank" rel="noreferrer" className="text-accent-fg hover:underline">
-                        {shortHash(f.txHash)}
-                      </a>
+                      <span className="inline-flex items-center gap-2" title={f.txHash}>
+                        {f.simulated ? <Badge tone="success">paper · journaled</Badge> : null}
+                        <a
+                          href={f.simulated ? journalTxUrl(f.txHash) : liveTxUrl(f.txHash)}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-accent-fg hover:underline"
+                        >
+                          View on BaseScan
+                        </a>
+                      </span>
                     ) : (
                       <Badge tone="warn">simulated</Badge>
                     )}

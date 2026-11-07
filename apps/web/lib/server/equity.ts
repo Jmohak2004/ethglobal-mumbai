@@ -4,7 +4,7 @@
 import { computeFifoPnl, type Trade } from "@arena/flash";
 
 import type { Db } from "@/lib/server/db";
-import type { EquityPoint, PortfolioSnapshot } from "@/lib/types";
+import type { EquityPoint, OrderTxRef, PortfolioSnapshot } from "@/lib/types";
 
 /** The slice of @arena/db's drizzle relational query API this module uses. The Db is opaque in lib/server/db.ts. */
 interface Ops {
@@ -80,6 +80,21 @@ export async function agentTrades(db: Db, agentId: string): Promise<Trade[]> {
     });
   }
   return trades;
+}
+
+/**
+ * The fill tx of each of an agent's orders, keyed by order id. Agent paper orders have ids prefixed "paper-" (see
+ * @arena/flash executor), and their fills carry the TradeJournal tx once the worker has journaled them.
+ */
+export async function agentOrderTxs(db: Db, agentId: string): Promise<Record<string, OrderTxRef>> {
+  const out: Record<string, OrderTxRef> = {};
+  for (const t of await agentTrades(db, agentId)) {
+    out[t.orderId] = {
+      txHash: /^0x[0-9a-fA-F]{64}$/.test(t.txId) ? (t.txId as `0x${string}`) : null,
+      paper: t.orderId.startsWith("paper-"),
+    };
+  }
+  return out;
 }
 
 const round2 = (n: number): number => Math.round(n * 100) / 100;

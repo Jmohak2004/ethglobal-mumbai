@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import type { AgentStatus, Episode, Lesson } from "@arena/shared";
+import type { AgentStatus, Lesson } from "@arena/shared";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useAccount } from "wagmi";
@@ -23,7 +23,7 @@ import { ApiClientError, describeError, getJson, postJson } from "@/lib/api";
 import { shortAddr } from "@/lib/format";
 import { useAgentRuntime } from "@/lib/hooks/use-agent-runtime";
 import { useSession } from "@/lib/hooks/use-session";
-import type { AgentTreasury, PaperLedgerView } from "@/lib/types";
+import type { AgentTreasury, DecisionEpisode, PaperLedgerView } from "@/lib/types";
 
 /**
  * Owner-only console. Requests run only when a wallet session exists (or ?owner=1 for the demo outside production).
@@ -52,7 +52,7 @@ export function OwnerSection({
 
   const episodes = useQuery({
     queryKey: ["episodes", agentId, demo],
-    queryFn: () => getJson<Episode[]>(`/api/agents/${agentId}/episodes${q}`),
+    queryFn: () => getJson<DecisionEpisode[]>(`/api/agents/${agentId}/episodes${q}`),
     enabled,
     retry: false,
   });

@@ -82,7 +82,8 @@ function toFill(r: PaperFillRow): Fill {
     sizeUsd: r.notionalUsd,
     priceUsd: r.price,
     feeUsd: r.feeUsd,
-    txHash: null,
+    // Set by the worker once the fill is journaled on Base Sepolia (TradeJournal).
+    txHash: r.txId && /^0x[0-9a-fA-F]{64}$/.test(r.txId) ? (r.txId as `0x${string}`) : null,
     simulated: true,
   };
 }

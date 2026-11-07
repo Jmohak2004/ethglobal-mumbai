@@ -15,7 +15,7 @@ import type {
 } from "@arena/shared";
 import { env } from "@/lib/server/env";
 import { dbContext, type Db, type Repo } from "@/lib/server/db";
-import { agentTrades, equitySeries } from "@/lib/server/equity";
+import { agentOrderTxs, agentTrades, equitySeries } from "@/lib/server/equity";
 import { readTreasuryAccount } from "@/lib/server/chain";
 import { ApiError } from "@/lib/server/errors";
 import { shortAddr } from "@/lib/format";
@@ -25,6 +25,7 @@ import { TEMPLATES, type TemplateDef } from "@/lib/templates";
 import type {
   AgentRuntimeState,
   AgentTreasury,
+  DecisionEpisode,
   EquityPoint,
   HumansPrefs,
   LeaderboardQuery,
@@ -140,10 +141,21 @@ export async function setHumansBoardOptIn(address: string, optIn: boolean): Prom
 }
 
 /** Decision log (owner-only, enforced by the route). Newest first. */
-export async function getAgentEpisodes(id: string): Promise<Episode[]> {
+export async function getAgentEpisodes(id: string): Promise<DecisionEpisode[]> {
   const ctx = await dbContext();
   if (!ctx) return mock.getAgentEpisodes(id);
-  return ctx.r.listEpisodesByAgent(ctx.db, id, { limit: 50 });
+  const [episodes, txByOrder] = await Promise.all([
+    ctx.r.listEpisodesByAgent(ctx.db, id, { limit: 50 }),
+    agentOrderTxs(ctx.db, id),
+  ]);
+  return episodes.map((e) => {
+    const orderTx: NonNullable<DecisionEpisode["orderTx"]> = {};
+    for (const orderId of e.flashOrderIds) {
+      const ref = txByOrder[orderId];
+      if (ref) orderTx[orderId] = ref;
+    }
+    return { ...e, orderTx };
+  });
 }
 
 /** Reflection lessons (owner-only, enforced by the route). */

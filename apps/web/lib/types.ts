@@ -12,8 +12,17 @@ import type {
   StrategyConfig,
   TemplateId,
 } from "@arena/shared";
-import type { RiskReason } from "@arena/shared";
+import type { Episode, RiskReason } from "@arena/shared";
 import type { Timeframe } from "@/lib/templates";
+
+/** The tx behind one order's fill. Paper: the TradeJournal tx on Base Sepolia (null until journaled). Live: the Flash settlement tx. */
+export interface OrderTxRef {
+  txHash: `0x${string}` | null;
+  paper: boolean;
+}
+
+/** A decision-log episode, with the fill tx of each order it placed (keyed by order id). */
+export type DecisionEpisode = Episode & { orderTx?: Record<string, OrderTxRef> };
 
 export interface LeaderboardQuery {
   kind?: "agent" | "human" | "all";

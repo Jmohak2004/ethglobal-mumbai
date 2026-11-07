@@ -91,6 +91,10 @@ export function pnlClass(n: number): string {
 }
 
 export const txUrl = (hash: string): string => `${EXPLORER}/tx/${hash}`;
+/** Live fills settle on Base mainnet (Flash), whatever NEXT_PUBLIC_BASE_EXPLORER says. */
+export const liveTxUrl = (hash: string): string => `https://basescan.org/tx/${hash}`;
+/** Paper fills are journaled on Base Sepolia (TradeJournal). */
+export const journalTxUrl = (hash: string): string => `https://sepolia.basescan.org/tx/${hash}`;
 export const addressUrl = (addr: string): string => `${EXPLORER}/address/${addr}`;
 export const zgTxUrl = (hash: string): string => `${ZG_EXPLORER}/tx/${hash}`;
 export const flashOrderUrl = (id: string): string => `${FLASH_ORDER_URL}${id}`;

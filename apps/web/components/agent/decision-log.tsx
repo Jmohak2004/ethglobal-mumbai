@@ -1,4 +1,4 @@
-import type { Episode, PolicyVerdict } from "@arena/shared";
+import type { PolicyVerdict } from "@arena/shared";
 
 import { Badge } from "@/components/ui/badge";
 import { CopyButton } from "@/components/ui/copy-button";
@@ -7,7 +7,8 @@ import { IconClock } from "@/components/ui/icons";
 import { Pill, type Tone } from "@/components/ui/pill";
 import { EmptyRow, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { Tooltip } from "@/components/ui/tooltip";
-import { flashOrderUrl, fmtAmount, fmtPct, shortHash } from "@/lib/format";
+import { flashOrderUrl, fmtAmount, fmtPct, journalTxUrl, liveTxUrl, shortHash } from "@/lib/format";
+import type { DecisionEpisode } from "@/lib/types";
 
 const VERDICT_TONE: Record<PolicyVerdict["kind"], Tone> = {
   approve: "long",
@@ -34,7 +35,7 @@ function utcShort(ts: number): string {
 }
 
 /** Owner decision log: forecast, proposal, policy verdict, 0G request id and Flash order. */
-export function DecisionLog({ episodes }: { episodes: Episode[] }) {
+export function DecisionLog({ episodes }: { episodes: DecisionEpisode[] }) {
   if (episodes.length === 0) {
     return (
       <EmptyState
@@ -67,13 +68,14 @@ export function DecisionLog({ episodes }: { episodes: Episode[] }) {
   );
 }
 
-function DecisionRow({ e }: { e: Episode }) {
+function DecisionRow({ e }: { e: DecisionEpisode }) {
   const p = e.decision?.proposal;
   const f = e.decision?.forecast;
   const arrow = f ? ARROW[f.direction] : null;
   const reasons = e.verdict.kind === "approve" ? ["Passed all policy checks."] : e.verdict.reasons;
   const entryPx = p?.limitPrice ?? p?.triggerPrice;
   const flashId = e.flashOrderIds[0];
+  const tx = flashId ? e.orderTx?.[flashId] : undefined;
 
   return (
     <TR>
@@ -129,12 +131,31 @@ function DecisionRow({ e }: { e: Episode }) {
         )}
       </TD>
       <TD>
-        {flashId ? (
-          <a href={flashOrderUrl(flashId)} target="_blank" rel="noreferrer" className="num text-accent-fg hover:underline">
-            {flashId}
-          </a>
-        ) : (
+        {!flashId ? (
           <span className="text-muted">None</span>
+        ) : tx?.paper ? (
+          // Paper orders never reached Flash. Their fill is journaled on Base Sepolia once the worker records it.
+          tx.txHash ? (
+            <span className="inline-flex flex-wrap items-center gap-2" title={tx.txHash}>
+              <Badge tone="success">paper · journaled</Badge>
+              <a href={journalTxUrl(tx.txHash)} target="_blank" rel="noreferrer" className="text-accent-fg hover:underline">
+                View on BaseScan
+              </a>
+            </span>
+          ) : (
+            <Badge tone="warn">simulated</Badge>
+          )
+        ) : (
+          <span className="inline-flex flex-wrap items-center gap-2">
+            <a href={flashOrderUrl(flashId)} target="_blank" rel="noreferrer" className="num text-accent-fg hover:underline">
+              {flashId}
+            </a>
+            {tx?.txHash ? (
+              <a href={liveTxUrl(tx.txHash)} target="_blank" rel="noreferrer" className="text-accent-fg hover:underline" title={tx.txHash}>
+                View on BaseScan
+              </a>
+            ) : null}
+          </span>
         )}
       </TD>
     </TR>
