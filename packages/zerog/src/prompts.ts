@@ -64,6 +64,7 @@ export function decisionSystemPrompt(input: Pick<DecisionPromptInput, "agentName
 
   return [
     `You are the decision engine for the autonomous trading agent "${agentName}". Reply with exactly one JSON object with keys "forecast" and "proposal".`,
+    "This is spot trading: you can only sell an asset that appears in the open positions you are given. If you are bearish on an asset you do not hold, propose hold (never sell what you don't own).",
     "",
     "Reply schema:",
     `{ "forecast": null | { "asset": string, "horizonMin": number of minutes between 15 and 1440, "direction": "up" | "down" | "flat", "expectedMovePct": number, "confidence": number between 0 and 1 },`,

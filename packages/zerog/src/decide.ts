@@ -79,10 +79,26 @@ export interface DecideResult {
  * API errors (e.g. `InsufficientBalanceError` on 402) still throw.
  */
 export async function decide(router: ZeroGRouter, input: DecideInput): Promise<DecideResult> {
-  const result = await chatJson(
+  const primaryModel = modelFor("decision", input.config.modelTier, input.budget);
+  const first = await decideWith(router, input, primaryModel);
+  if (first.ok) return { output: first.data, trace: first.trace, traces: first.traces, fallback: false, error: null };
+  // The economical model sometimes truncates its JSON. Before giving up, try once on the balanced model,
+  // unless the budget forced the economical model (then a stronger model would break the budget rule).
+  const fallbackModel = modelFor("decision", "balanced", "healthy");
+  if (fallbackModel !== primaryModel && input.budget === "healthy") {
+    const second = await decideWith(router, input, fallbackModel);
+    const traces = [...first.traces, ...second.traces];
+    if (second.ok) return { output: second.data, trace: second.trace, traces, fallback: false, error: null };
+    return { output: holdOutput(second.error), trace: second.trace, traces, fallback: true, error: second.error };
+  }
+  return { output: holdOutput(first.error), trace: first.trace, traces: first.traces, fallback: true, error: first.error };
+}
+
+async function decideWith(router: ZeroGRouter, input: DecideInput, model: string) {
+  return chatJson(
     router,
     {
-      model: modelFor("decision", input.config.modelTier, input.budget),
+      model,
       messages: [
         {
           role: "system",
@@ -111,17 +127,6 @@ export async function decide(router: ZeroGRouter, input: DecideInput): Promise<D
     },
     DecisionOutputSchema,
   );
-
-  if (result.ok) {
-    return { output: result.data, trace: result.trace, traces: result.traces, fallback: false, error: null };
-  }
-  return {
-    output: holdOutput(result.error),
-    trace: result.trace,
-    traces: result.traces,
-    fallback: true,
-    error: result.error,
-  };
 }
 
 export function holdOutput(reason: string): DecisionOutput {

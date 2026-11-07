@@ -186,3 +186,20 @@ describe("decide", () => {
     await expect(decide(makeRouter(fetch), input)).rejects.toBeInstanceOf(InsufficientBalanceError);
   });
 });
+
+describe("decide: stronger-model retry", () => {
+  test("an economical agent whose replies are broken JSON gets one more try on the balanced model", async () => {
+    const { fetch, calls } = sequenceFetch(["{\"forecast\":", "{\"forecast\":", VALID_BUY]);
+    const res = await decide(makeRouter(fetch), { ...input, config: { ...input.config, modelTier: "economical" } });
+    expect(res.fallback).toBe(false);
+    expect(res.output.proposal.action).toBe("buy");
+    expect(calls.map((c) => c.body?.model)).toEqual(["0gm-1.0-35b-a3b", "0gm-1.0-35b-a3b", "qwen3.8-max"]);
+  });
+
+  test("no stronger-model retry when the budget forced the economical model", async () => {
+    const { fetch, calls } = sequenceFetch(["{\"forecast\":"]);
+    const res = await decide(makeRouter(fetch), { ...input, budget: "low" });
+    expect(res.fallback).toBe(true);
+    expect(calls.every((c) => c.body?.model === "0gm-1.0-35b-a3b")).toBe(true);
+  });
+});

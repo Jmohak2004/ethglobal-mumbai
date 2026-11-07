@@ -339,7 +339,14 @@ export function evaluate(proposal: Proposal, ctx: PolicyContext, opts: EvaluateO
   // Price-bearing order types.
   let limitPrice: number | undefined;
   let triggerPrice: number | undefined;
-  if (orderType === "limit") {
+  if (isBuy && orderType === "stop") {
+    // Flash only attaches a TP/SL bracket to market, limit and TWAP entries, and every buy here carries one.
+    // A stop-buy becomes a limit at the breakout price: it fills at once if price is already through the level,
+    // otherwise it rests there, and the attached bracket protects it either way.
+    orderType = "limit";
+    limitPrice = resolvePrice("limitPrice", proposal.triggerPrice ?? proposal.limitPrice, mark, maxDev, rejects, clamps);
+    clamps.push("stop-buy entries can't carry TP/SL on Flash; entering with a limit at the breakout price");
+  } else if (orderType === "limit") {
     limitPrice = resolvePrice("limitPrice", proposal.limitPrice, mark, maxDev, rejects, clamps);
   }
   if (orderType === "stop" || orderType === "stop-loss" || orderType === "take-profit") {

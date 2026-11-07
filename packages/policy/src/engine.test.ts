@@ -288,11 +288,15 @@ describe("evaluate: price bands, TWAP and trailing stops", () => {
     expect(evaluate(buy({ orderType: "limit" }), makeCtx()).kind).toBe("reject");
   });
 
-  test("stop trigger price outside the band is clamped", () => {
+  test("stop-buy becomes a limit at the breakout price, clamped into the band, with TP/SL attached", () => {
     const v = evaluate(buy({ orderType: "stop", triggerPrice: 1000, takeProfitPct: undefined, stopLossPct: undefined }), makeCtx("breakout"));
     expect(v.kind).toBe("clamp");
     if (v.kind !== "clamp") return;
-    expect(v.order.triggerPrice).toBeCloseTo(1900, 6);
+    expect(v.order.orderType).toBe("limit");
+    expect(v.order.limitPrice).toBeCloseTo(1900, 6);
+    expect(v.order.triggerPrice).toBeUndefined();
+    expect(v.order.attachedBracket).toBeDefined();
+    expect(v.reasons.some((r) => r.includes("stop-buy entries"))).toBe(true);
   });
 
   test("twap duration and buckets are clamped to Flash ranges", () => {
