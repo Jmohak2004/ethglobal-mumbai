@@ -79,6 +79,13 @@ export const WorkerEnvSchema = EnvSchema.extend({
   PLATFORM_ADMIN_PRIVATE_KEY: privateKey.optional(),
   /** Key on the 0G chain that pays for Payment Layer deposits. */
   RELAYER_ZG_PRIVATE_KEY: privateKey.optional(),
+  /**
+   * 0G account the relayer credits through the Payment Layer. Router keys bill the wallet account that owns them
+   * (here the platform account behind ZG_MGMT_KEY), so a deposit to an agent's own zg_wallet funds no Router key.
+   * Set this to the platform account (GET /v1/account/balance `address`) so top-ups pay for agent inference.
+   * Unset keeps the old behaviour: deposit to the agent's zg_wallet.
+   */
+  ZG_DEPOSIT_RECIPIENT: address.optional(),
   /** Per-request guard: a TopUpRequested above this many USDC is not converted. */
   RELAYER_MAX_REQUEST_USD: num(2),
   RELAYER_POLL_SEC: num(15),

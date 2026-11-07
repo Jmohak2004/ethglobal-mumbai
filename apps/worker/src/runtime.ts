@@ -295,6 +295,7 @@ export function createRuntime(env: WorkerEnv, overrides: RuntimeOverrides = {}):
         spreadBps: env.RELAYER_SPREAD_BPS,
         maxRequestUsd: env.RELAYER_MAX_REQUEST_USD,
         zg: { rpcUrl: env.ZG_RPC_URL, privateKey: env.RELAYER_ZG_PRIVATE_KEY as Hex, network: env.NETWORK },
+        depositRecipient: (env.ZG_DEPOSIT_RECIPIENT as Hex | undefined) ?? null,
         agents: () => loadAgents(db, ["active", "paused"]),
       };
     },

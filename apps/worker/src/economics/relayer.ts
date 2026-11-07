@@ -116,6 +116,11 @@ export interface RelayerOptions {
   spreadBps: number;
   maxRequestUsd: number;
   zg: { rpcUrl: string; privateKey: Hex; network: "mainnet" | "testnet" };
+  /**
+   * Account credited by depositFor, for every agent. The Router bills the account that owns the API keys (the
+   * platform account), so this should be that account. When absent, the agent's own zgWallet is credited.
+   */
+  depositRecipient?: Hex | null;
   /** Agents to resolve TopUpRequested logs against. */
   agents: () => Promise<Array<Pick<Agent, "id" | "zgWallet">>>;
 }
@@ -188,17 +193,17 @@ export async function processTopUpRequest(
   await markRow("relaying");
   try {
     const deposit = opts.deposit ?? depositToPaymentLayer;
-    const res = await deposit({ rpcUrl: opts.zg.rpcUrl, privateKey: opts.zg.privateKey, network: opts.zg.network, amountWei, recipient: agent.zgWallet });
+    const res = await deposit({ rpcUrl: opts.zg.rpcUrl, privateKey: opts.zg.privateKey, network: opts.zg.network, amountWei, recipient: opts.depositRecipient ?? agent.zgWallet });
     await updateTopup(opts.db, rowId, { status: "deposited", depositTx: res.txHash });
     await insertTreasuryEvent(opts.db, {
       agentId: agent.id,
       kind: "relayer_deposit",
       amountUsd: usd,
       txHash: res.txHash,
-      meta: { zgAmountWei: amountWei.toString(), baseTx: req.txHash, nonce: req.nonce.toString() },
+      meta: { zgAmountWei: amountWei.toString(), baseTx: req.txHash, nonce: req.nonce.toString(), recipient: res.recipient },
       ts: opts.clock.now(),
     });
-    logger.info("top-up deposited to 0G", { usd, zgAmountWei: amountWei.toString(), depositTx: res.txHash });
+    logger.info("top-up deposited to 0G", { usd, zgAmountWei: amountWei.toString(), depositTx: res.txHash, recipient: res.recipient });
     return "deposited";
   } catch (err) {
     logger.error("0G deposit failed", { topup: rowId, error: err });

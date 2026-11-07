@@ -15,6 +15,7 @@ describe("loadWorkerEnv", () => {
     expect(env.WORKER_MAX_CONCURRENCY).toBe(3);
     expect(env.AGENT_SEED_CREDIT_0G).toBe(1);
     expect(env.RELAYER_MAX_REQUEST_USD).toBe(2);
+    expect(env.ZG_DEPOSIT_RECIPIENT).toBeUndefined();
   });
 
   test("blank values are treated as unset", () => {

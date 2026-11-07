@@ -94,6 +94,16 @@ describe("relayer", () => {
     expect(rows[0]?.depositTx).toBe(hash("cd"));
   });
 
+  test("ZG_DEPOSIT_RECIPIENT sends the deposit to the platform Router account instead of the agent's zg wallet", async () => {
+    const PLATFORM = "0x72aa29aa31e25a44398ef48c646cc7855d09c36f" as const;
+    const { db, agent, deposits, runOpts } = await relayerFixture();
+    const res = await runRelayerOnce({ ...runOpts, depositRecipient: PLATFORM });
+    expect(res.deposited).toBe(1);
+    expect(deposits[0]?.recipient).toBe(PLATFORM);
+    const events = await db.query.treasuryEvents.findMany({ where: (e, { eq }) => eq(e.agentId, agent.id) });
+    expect((events.find((e) => e.kind === "relayer_deposit")?.meta as { recipient?: string }).recipient).toBe(PLATFORM);
+  });
+
   test("replaying the same TopUpRequested nonce never deposits twice", async () => {
     const { deposits, runOpts, cursor, chain, request, agent, db } = await relayerFixture();
     await runRelayerOnce(runOpts);
