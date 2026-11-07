@@ -10,7 +10,15 @@ import { createPrivateKey, createPublicKey } from "node:crypto";
 import { getProvisioning, updateProvisioning, type Db, type ProvisioningState } from "@arena/db";
 import type { MessageSigner, OrderSigner, SignableTypedData } from "@arena/flash";
 import { getAddress, toHex, type Hex } from "viem";
-import type { TradingSender, TxRequest, WalletProvider } from "./wallets.ts";
+import {
+  FLASH_CAIP2,
+  flashSenderOf,
+  type FlashChainClient,
+  type FlashSender,
+  type TradingSender,
+  type TxRequest,
+  type WalletProvider,
+} from "./wallets.ts";
 
 export interface PrivyWalletRecord {
   id: string;
@@ -75,6 +83,17 @@ export interface PrivyWalletProviderOptions {
   policyId?: string;
   /** Base64 PKCS8 P-256 private key (PRIVY_AUTHORIZATION_KEY). Owns new wallets and signs every wallet call. */
   authorizationKey?: string;
+  /** Base mainnet reads for Flash approvals (balance, receipts). Flash sends go to FLASH_CAIP2 regardless of caip2. */
+  flash?: FlashChainClient;
+}
+
+/**
+ * The CAIP-2 chain a typed-data signature is for: the chain in its EIP-712 domain. Flash orders are on Base mainnet
+ * even when CHAIN is Base Sepolia, so the provider's own caip2 is only the fallback for domains without a chainId.
+ */
+export function caip2ForDomain(td: SignableTypedData, fallback: string): string {
+  const chainId = td.domain.chainId;
+  return chainId === undefined ? fallback : `eip155:${chainId}`;
 }
 
 /** Privy's JSON key for the stored wallet id. It sits in the provisioning jsonb next to the other step fields. */
@@ -170,7 +189,7 @@ export class PrivyWalletProvider implements WalletProvider {
           .ethereum()
           .signTypedData(wallet.id, {
             ...this.authorization,
-            caip2: this.opts.caip2,
+            caip2: caip2ForDomain(td, this.opts.caip2),
             params: { typed_data: toPrivyTypedData(td) },
           });
         return signatureHex(res.signature);
@@ -197,16 +216,26 @@ export class PrivyWalletProvider implements WalletProvider {
     const wallet = await this.walletFor(agent.id);
     return {
       address: getAddress(wallet.address),
-      sendTransaction: async (tx: TxRequest) => {
-        const transaction: { to: string; data: string; value?: string } = { to: tx.to, data: tx.data };
-        if (tx.value !== undefined && tx.value > 0n) transaction.value = toHex(tx.value);
-        const res = await this.opts.client
-          .wallets()
-          .ethereum()
-          .sendTransaction(wallet.id, { ...this.authorization, caip2: this.opts.caip2, params: { transaction } });
-        return res.hash as Hex;
-      },
+      sendTransaction: (tx: TxRequest) => this.sendFrom(wallet.id, this.opts.caip2, tx),
     };
+  }
+
+  async flashSenderFor(agent: { id: string }): Promise<FlashSender> {
+    const chain = this.opts.flash;
+    if (!chain) throw new Error("Privy Flash approvals need a Base mainnet client: no flash chain is configured");
+    const wallet = await this.walletFor(agent.id);
+    return flashSenderOf(getAddress(wallet.address), (tx) => this.sendFrom(wallet.id, FLASH_CAIP2, tx), chain);
+  }
+
+  /** eth_sendTransaction from one Privy wallet on the given chain. Resolves with the hash once Privy accepts it. */
+  private async sendFrom(walletId: string, caip2: string, tx: TxRequest): Promise<Hex> {
+    const transaction: { to: string; data: string; value?: string } = { to: tx.to, data: tx.data };
+    if (tx.value !== undefined && tx.value > 0n) transaction.value = toHex(tx.value);
+    const res = await this.opts.client
+      .wallets()
+      .ethereum()
+      .sendTransaction(walletId, { ...this.authorization, caip2, params: { transaction } });
+    return res.hash as Hex;
   }
 
   /**

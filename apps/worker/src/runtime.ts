@@ -7,7 +7,8 @@ import { globalLimitsFromEnv, ZG_ROUTER_URL, type Agent } from "@arena/shared";
 import { NoopMemoryStore, ZeroGAccount, ZeroGRouter, ZeroGStorage, type MemoryStore } from "@arena/zerog";
 import { PrivyClient } from "@privy-io/node";
 import type { Hex } from "viem";
-import { caip2For, chainConfigFor, publicClientFor, type ChainConfig } from "./chain.ts";
+import { caip2For, chainConfigFor, flashChainFor, publicClientFor, type ChainConfig } from "./chain.ts";
+import { createViemFlashChain } from "./flash-chain.ts";
 import type { WorkerEnv } from "./env.ts";
 import { createBudgetSource } from "./budget.ts";
 import { AgentLock } from "./agent-lock.ts";
@@ -88,6 +89,8 @@ const missingFlashClient: Pick<FlashClient, "quote" | "submitOrder"> = {
  * provisioning jsonb. Local wallets come from the DEV_AGENT_* keys, and local approvals are sent on the configured chain.
  */
 export function walletProviderFor(env: WorkerEnv, deps: { db: Db; chain: ChainConfig }): WalletProvider {
+  // Flash approvals always go to Base mainnet, whatever CHAIN is.
+  const flashConfig = flashChainFor(env);
   if (env.WALLET_PROVIDER === "privy") {
     if (!env.PRIVY_APP_ID || !env.PRIVY_APP_SECRET) throw new Error("WALLET_PROVIDER=privy needs PRIVY_APP_ID and PRIVY_APP_SECRET");
     const client = new PrivyClient({ appId: env.PRIVY_APP_ID, appSecret: env.PRIVY_APP_SECRET });
@@ -97,6 +100,7 @@ export function walletProviderFor(env: WorkerEnv, deps: { db: Db; chain: ChainCo
       caip2: caip2For(deps.chain),
       policyId: env.PRIVY_POLICY_ID,
       authorizationKey: env.PRIVY_AUTHORIZATION_KEY,
+      flash: createViemFlashChain(flashConfig),
     });
   }
   if (env.DEV_AGENT_MNEMONIC || env.DEV_AGENT_PRIVATE_KEY) {
@@ -104,6 +108,7 @@ export function walletProviderFor(env: WorkerEnv, deps: { db: Db; chain: ChainCo
       mnemonic: env.DEV_AGENT_MNEMONIC,
       privateKey: env.DEV_AGENT_PRIVATE_KEY as Hex | undefined,
       sendTransaction: createViemLocalSend(deps.chain),
+      flash: { chain: createViemFlashChain(flashConfig), sendTransaction: createViemLocalSend(flashConfig) },
     });
   }
   return new UnconfiguredWalletProvider("WALLET_PROVIDER=local needs DEV_AGENT_MNEMONIC or DEV_AGENT_PRIVATE_KEY");
@@ -140,7 +145,8 @@ export function createRuntime(env: WorkerEnv, overrides: RuntimeOverrides = {}):
   const wallets: WalletProvider = walletProviderFor(env, { db, chain });
 
   const flash = env.DEFINITIVE_API_KEY ? new FlashClient({ apiKey: env.DEFINITIVE_API_KEY }) : null;
-  const executor = new FlashExecutor({ client: flash ?? missingFlashClient, integratorFeeBps: env.FLASH_INTEGRATOR_FEE_BPS, tokens: chain.tokens });
+  // Flash settles on Base mainnet, so quotes name mainnet token addresses even when CHAIN is Base Sepolia.
+  const executor = new FlashExecutor({ client: flash ?? missingFlashClient, integratorFeeBps: env.FLASH_INTEGRATOR_FEE_BPS, tokens: flashChainFor(env).tokens });
   // Live cancels and stop moves are signed by the agent's message signer (EIP-191), and the signer must be the trading wallet.
   const orderControlFor = flash
     ? async (agent: Agent): Promise<OrderControl> => {

@@ -14,11 +14,25 @@ import {
   type InsertForecastInput,
   type OrderRecord,
 } from "@arena/db";
-import { computeFifoPnl, type ExecutionResult, type FifoPnlResult, type OrderSigner, type Trade } from "@arena/flash";
+import {
+  computeFifoPnl,
+  FlashApprovalRequiredError,
+  type ApprovalRequirements,
+  type ExecutionResult,
+  type FifoPnlResult,
+  type OrderSigner,
+  type Trade,
+} from "@arena/flash";
 import type { Agent, Episode, ExecutionMode, InferenceTrace, OrderIntent } from "@arena/shared";
+import type { Hex } from "viem";
 import type { Deps } from "./deps.ts";
+import type { Logger } from "./logger.ts";
+import type { FlashSender, TxRequest } from "./wallets.ts";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** Flash setup transactions (quote.setupTxs) must be signed and posted to /setup-transaction. Not implemented yet. */
+export const FLASH_SETUP_UNSUPPORTED = "Flash setupTxs not supported yet";
 
 /** Paper mode never signs, so the funder is the trading address and signing throws if it is ever reached. */
 export function paperSigner(agent: Pick<Agent, "tradingWallet">): OrderSigner {
@@ -96,12 +110,16 @@ export async function loadAgentState(db: Db, agent: Agent, now: number): Promise
   };
 }
 
-/** DB rows for an executed order: the order itself and, for paper fills, the simulated fill. */
+/**
+ * DB rows for an executed order: the order itself and, for paper fills, the simulated fill. `approvalTxs` are the
+ * Flash approval txs mined on Base mainnet before a live order; they are kept on the order's raw record.
+ */
 export function orderRows(
   exec: ExecutionResult,
   agent: Pick<Agent, "id" | "tradingWallet">,
   intent: OrderIntent,
   now: number,
+  approvalTxs: Hex[] = [],
 ): { record: OrderRecord; fills: FillRecord[] } {
   const base = {
     id: exec.orderId,
@@ -142,7 +160,12 @@ export function orderRows(
     record: {
       ...base,
       status: exec.status,
-      raw: { quoteId: exec.quote.quoteId, attachedBracketStatus: exec.attachedBracketStatus, attachedBracket: bracket },
+      raw: {
+        quoteId: exec.quote.quoteId,
+        attachedBracketStatus: exec.attachedBracketStatus,
+        attachedBracket: bracket,
+        ...(approvalTxs.length > 0 ? { approvalTxs } : {}),
+      },
     },
     fills: [],
   };
@@ -151,6 +174,8 @@ export function orderRows(
 export interface PlacedOrder {
   orderId: string;
   mode: ExecutionMode;
+  /** Flash approval txs mined on Base mainnet before this order, in send order. Empty when none were needed. */
+  approvalTxs: Hex[];
   /** Rows to persist with the episode. */
   persist: { record: OrderRecord; fills: FillRecord[] };
 }
@@ -160,21 +185,118 @@ export function modeFor(deps: Pick<Deps, "executionMode">, agent: Pick<Agent, "m
   return deps.executionMode === "live" && agent.mode === "live" ? "live" : "paper";
 }
 
+/** The trading wallet's Flash sender on Base mainnet. Checked against the wallet the DB recorded, like liveSignerFor. */
+export async function liveFlashSenderFor(deps: Pick<Deps, "wallets">, agent: Agent): Promise<FlashSender> {
+  if (!deps.wallets.flashSenderFor) throw new Error("this wallet provider cannot send Flash approvals on Base mainnet");
+  const sender = await deps.wallets.flashSenderFor(agent);
+  if (sender.address.toLowerCase() !== agent.tradingWallet.toLowerCase()) {
+    throw new Error(`flash sender ${sender.address} does not match the agent trading wallet ${agent.tradingWallet}`);
+  }
+  return sender;
+}
+
 /**
- * Sends one policy-approved intent through the executor, in the mode modeFor() gives. Throws on failure;
- * the caller decides how to record it.
+ * Sends the approvals a quote requires on Base mainnet, in order: wrap, approve, bracket approve. Each one must be
+ * mined successfully before the next is sent. Every hash is pushed to `sent` as soon as it is mined, so the caller
+ * can still record them when a later step fails. Quote setupTxs are refused, not guessed at.
+ */
+export async function sendFlashApprovals(
+  sender: FlashSender,
+  reqs: ApprovalRequirements,
+  sent: Hex[],
+  log: Pick<Logger, "info">,
+): Promise<void> {
+  if (reqs.setupTxs.length > 0) {
+    throw new Error(
+      `${FLASH_SETUP_UNSUPPORTED}: the quote needs ${reqs.setupTxs.length} setup transaction(s) first; no approval was sent`,
+    );
+  }
+  const steps: Array<{ label: string; tx: TxRequest }> = [];
+  if (reqs.wrapTx) {
+    steps.push({ label: "wrap", tx: { to: reqs.wrapTx.to, data: reqs.wrapTx.data, value: BigInt(reqs.wrapTx.value) } });
+  }
+  if (reqs.approveTx) steps.push({ label: "approve", tx: { to: reqs.approveTx.to, data: reqs.approveTx.data } });
+  if (reqs.bracketApproveTx) {
+    steps.push({ label: "bracket approve", tx: { to: reqs.bracketApproveTx.to, data: reqs.bracketApproveTx.data } });
+  }
+  if (steps.length === 0) return;
+
+  const eth = await sender.ethBalance();
+  if (eth === 0n) {
+    throw new Error(
+      `trading wallet ${sender.address} needs gas on Base mainnet: it holds 0 ETH, so it cannot send the Flash approval(s)`,
+    );
+  }
+  for (const step of steps) {
+    const res = await sender.sendAndWait(step.tx);
+    sent.push(res.hash);
+    log.info("flash approval mined", { step: step.label, txHash: res.hash, status: res.status, chain: "base" });
+    if (res.status !== "success") {
+      throw new Error(`Flash ${step.label} transaction reverted on Base mainnet (tx ${res.hash})`);
+    }
+  }
+}
+
+/** Adds the approval txs already mined to an error, so they are recorded on the episode next to the failure. */
+function withApprovalNote(err: unknown, approvalTxs: Hex[]): unknown {
+  if (approvalTxs.length === 0) return err;
+  const reason = err instanceof Error ? err.message : String(err);
+  return new Error(`${reason} (Flash approval txs mined on Base mainnet: ${approvalTxs.join(", ")})`);
+}
+
+/**
+ * Live execution with at most one approval round. If the quote needs onchain steps, they are sent on Base mainnet and
+ * the order is quoted again. A second request for approvals in the same call is an error, so this cannot loop.
+ */
+async function executeLive(
+  deps: Pick<Deps, "wallets" | "executor" | "logger">,
+  agent: Agent,
+  intent: OrderIntent,
+  signer: OrderSigner,
+  referencePriceUsd: number,
+): Promise<{ exec: ExecutionResult; approvalTxs: Hex[] }> {
+  const approvalTxs: Hex[] = [];
+  const submit = () => deps.executor.execute(intent, signer, "live", { referencePriceUsd });
+  try {
+    try {
+      return { exec: await submit(), approvalTxs };
+    } catch (err) {
+      if (!(err instanceof FlashApprovalRequiredError)) throw err;
+      const log = deps.logger.child({ agent: agent.id });
+      await sendFlashApprovals(await liveFlashSenderFor(deps, agent), err.requirements, approvalTxs, log);
+    }
+    try {
+      return { exec: await submit(), approvalTxs };
+    } catch (err) {
+      if (err instanceof FlashApprovalRequiredError) {
+        throw new Error("Flash still requires onchain setup after the approvals were mined; not sending another approval round");
+      }
+      throw err;
+    }
+  } catch (err) {
+    throw withApprovalNote(err, approvalTxs);
+  }
+}
+
+/**
+ * Sends one policy-approved intent through the executor, in the mode modeFor() gives. Live orders that need Flash
+ * approvals get them sent on Base mainnet first (executeLive). Throws on failure; the caller decides how to record it.
  */
 export async function placeOrder(
-  deps: Pick<Deps, "executionMode" | "wallets" | "executor">,
+  deps: Pick<Deps, "executionMode" | "wallets" | "executor" | "logger">,
   agent: Agent,
   intent: OrderIntent,
   referencePriceUsd: number,
   now: number,
 ): Promise<PlacedOrder> {
   const mode = modeFor(deps, agent);
-  const signer = mode === "live" ? await liveSignerFor(deps, agent) : paperSigner(agent);
-  const exec = await deps.executor.execute(intent, signer, mode, { referencePriceUsd });
-  return { orderId: exec.orderId, mode, persist: orderRows(exec, agent, intent, now) };
+  if (mode === "paper") {
+    const exec = await deps.executor.execute(intent, paperSigner(agent), "paper", { referencePriceUsd });
+    return { orderId: exec.orderId, mode, approvalTxs: [], persist: orderRows(exec, agent, intent, now) };
+  }
+  const signer = await liveSignerFor(deps, agent);
+  const { exec, approvalTxs } = await executeLive(deps, agent, intent, signer, referencePriceUsd);
+  return { orderId: exec.orderId, mode, approvalTxs, persist: orderRows(exec, agent, intent, now, approvalTxs) };
 }
 
 export interface Persistence {

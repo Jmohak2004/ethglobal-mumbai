@@ -1,5 +1,6 @@
 // Agent wallets. The trading wallet signs Flash EIP-712 orders (OrderSigner), signs Flash cancel and update
-// messages (MessageSigner, EIP-191), and sends approvals (TradingSender). LocalWalletProvider derives keys from a
+// messages (MessageSigner, EIP-191), sends USDC approvals on CHAIN (TradingSender), and sends Flash approvals and
+// wraps on Base mainnet (FlashSender). LocalWalletProvider derives keys from a
 // mnemonic or one key (dev only). PrivyWalletProvider (privy-wallets.ts) uses Privy server wallets (PRD 7.4).
 
 import { createHash } from "node:crypto";
@@ -20,6 +21,54 @@ export interface TradingSender {
   sendTransaction(tx: TxRequest): Promise<Hex>;
 }
 
+/** Outcome of a mined transaction: "reverted" means it was mined and failed. */
+export interface FlashTxResult {
+  hash: Hex;
+  status: "success" | "reverted";
+}
+
+/**
+ * The trading wallet as a sender on Base mainnet, where Flash settles (approve, wrap). Separate from TradingSender,
+ * which follows CHAIN: in the hybrid deployment Flash approvals must go to mainnet whatever CHAIN says.
+ */
+export interface FlashSender {
+  readonly address: Hex;
+  /** Native ETH balance of the trading wallet on Base mainnet, in wei. */
+  ethBalance(): Promise<bigint>;
+  /** Sends the tx on Base mainnet and resolves once its receipt is mined. Throws if no receipt arrives. */
+  sendAndWait(tx: TxRequest): Promise<FlashTxResult>;
+}
+
+/** Base mainnet reads for Flash approvals. Sending is the provider's job, because only the provider holds the key. */
+export interface FlashChainClient {
+  ethBalance(address: Hex): Promise<bigint>;
+  waitForReceipt(hash: Hex): Promise<"success" | "reverted">;
+}
+
+/** CAIP-2 id of Base mainnet, the chain Flash settles on. Privy wallets send Flash approvals on this chain. */
+export const FLASH_CAIP2 = "eip155:8453";
+
+/** Builds a FlashSender from a send function and a Base mainnet client. Both providers use it. */
+export function flashSenderOf(
+  address: Hex,
+  send: (tx: TxRequest) => Promise<Hex>,
+  chain: FlashChainClient,
+): FlashSender {
+  return {
+    address,
+    ethBalance: () => chain.ethBalance(address),
+    async sendAndWait(tx) {
+      const hash = await send(tx);
+      try {
+        return { hash, status: await chain.waitForReceipt(hash) };
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        throw new Error(`tx ${hash} was sent on Base mainnet but its receipt did not arrive: ${reason}`);
+      }
+    },
+  };
+}
+
 export interface WalletProvider {
   /** Signer for Flash EIP-712 orders. Only called for live orders. */
   signerFor(agent: { id: string }): Promise<OrderSigner>;
@@ -27,12 +76,20 @@ export interface WalletProvider {
   messageSignerFor(agent: { id: string }): Promise<MessageSigner>;
   /** The trading address that funds this agent's orders. */
   addressFor(agent: { id: string }): Promise<`0x${string}`>;
-  /** Sends transactions from the trading wallet (USDC approve). Absent when the provider cannot send. */
+  /** Sends transactions from the trading wallet on CHAIN (USDC approve in provisioning). Absent when the provider cannot send. */
   tradingSenderFor?(agent: { id: string }): Promise<TradingSender>;
+  /** Sends Flash approvals and wraps from the trading wallet on Base mainnet (chain 8453). Absent when the provider cannot send. */
+  flashSenderFor?(agent: { id: string }): Promise<FlashSender>;
   /** The local key behind the trading wallet. Only providers that hold keys implement it (dev). */
   localAccountFor?(agent: { id: string }): LocalAccount;
   /** The agent's 0G wallet. Derived in a namespace separate from the trading wallets. Absent when unsupported. */
   zgAddressFor?(agent: { id: string }): Promise<`0x${string}`>;
+}
+
+/** Dev wallets' Base mainnet path: the chain client and a send signed by the local account. */
+export interface LocalFlashOptions {
+  chain: FlashChainClient;
+  sendTransaction: (account: LocalAccount, tx: TxRequest) => Promise<Hex>;
 }
 
 /** BIP-44 account branch for 0G wallets. Trading wallets use branch 0 (viem's default), so the two never collide. */
@@ -63,17 +120,21 @@ export class LocalWalletProvider implements WalletProvider {
   private readonly accountFor: (agentId: string) => LocalAccount;
   private readonly zgAccountFor: (agentId: string) => LocalAccount;
   private readonly send: ((account: LocalAccount, tx: TxRequest) => Promise<Hex>) | undefined;
+  private readonly flash: LocalFlashOptions | undefined;
 
   /**
    * `sendTransaction` is the chain-aware send (the runtime passes a viem wallet client). Without it, approvals
-   * from local wallets fail with a clear error, and everything else still works.
+   * from local wallets fail with a clear error, and everything else still works. `flash` is the Base mainnet
+   * send and client for Flash approvals; without it, flashSenderFor fails with a clear error.
    */
   constructor(opts: {
     mnemonic?: string;
     privateKey?: Hex;
     sendTransaction?: (account: LocalAccount, tx: TxRequest) => Promise<Hex>;
+    flash?: LocalFlashOptions;
   }) {
     this.send = opts.sendTransaction;
+    this.flash = opts.flash;
     if (opts.mnemonic) {
       const mnemonic = opts.mnemonic.trim();
       // Throws on an invalid mnemonic, which is what we want at startup.
@@ -118,6 +179,13 @@ export class LocalWalletProvider implements WalletProvider {
         return send(account, tx);
       },
     };
+  }
+
+  async flashSenderFor(agent: { id: string }): Promise<FlashSender> {
+    const account = this.accountFor(agent.id);
+    const flash = this.flash;
+    if (!flash) throw new Error("local Flash approvals need a Base mainnet client: no flash chain is configured");
+    return flashSenderOf(account.address, (tx) => flash.sendTransaction(account, tx), flash.chain);
   }
 
   localAccountFor(agent: { id: string }): LocalAccount {

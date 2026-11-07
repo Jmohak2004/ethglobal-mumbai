@@ -371,3 +371,58 @@ describe("provisioning with a Privy trading wallet", () => {
     ]);
   });
 });
+
+describe("PrivyWalletProvider Base mainnet (Flash) calls", () => {
+  test("Flash typed data is signed on the chain named in its domain, even when the provider chain is Base Sepolia", async () => {
+    const privy = fakePrivy();
+    const { store } = memoryStore({ "agent-a": "wal_1" });
+    const provider = new PrivyWalletProvider({ client: privy.client, store, caip2: CAIP2 });
+    const signer = await provider.signerFor({ id: "agent-a" });
+
+    await signer.signTypedData({ ...FLASH_TYPED_DATA, domain: { ...FLASH_TYPED_DATA.domain, chainId: 8453 } });
+
+    expect(privy.signed).toHaveLength(1);
+    expect(privy.signed[0]?.input.caip2).toBe("eip155:8453");
+  });
+
+  test("Flash approvals are sent on eip155:8453 and their receipts are read from the Base mainnet client", async () => {
+    const privy = fakePrivy();
+    const { store } = memoryStore({ "agent-a": "wal_1" });
+    const waited: string[] = [];
+    const provider = new PrivyWalletProvider({
+      client: privy.client,
+      store,
+      caip2: CAIP2,
+      flash: {
+        async ethBalance() {
+          return 1n;
+        },
+        async waitForReceipt(hash) {
+          waited.push(hash);
+          return "success";
+        },
+      },
+    });
+    const usdc = `0x${"36".repeat(20)}` as const;
+    const data = `0x095ea7b3${"00".repeat(64)}` as const;
+    const sender = await provider.flashSenderFor({ id: "agent-a" });
+
+    expect(await sender.sendAndWait({ to: usdc, data, value: 1000n })).toEqual({ hash: HASH, status: "success" });
+
+    expect(privy.signed).toEqual([
+      {
+        op: "eth_sendTransaction",
+        walletId: "wal_1",
+        input: { caip2: "eip155:8453", params: { transaction: { to: usdc, data, value: "0x3e8" } } },
+      },
+    ]);
+    expect(waited).toEqual([HASH]);
+  });
+
+  test("a Privy provider without a Base mainnet client fails Flash sends with a clear error", async () => {
+    const privy = fakePrivy();
+    const { store } = memoryStore({ "agent-a": "wal_1" });
+    const provider = new PrivyWalletProvider({ client: privy.client, store, caip2: CAIP2 });
+    await expect(provider.flashSenderFor({ id: "agent-a" })).rejects.toThrow("no flash chain is configured");
+  });
+});
