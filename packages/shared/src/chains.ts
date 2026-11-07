@@ -26,6 +26,18 @@ export const BASE_TOKENS: Record<string, TokenInfo> = {
   TOSHI: { symbol: "TOSHI", address: "0xAC1Bd2486aAf3B5C0fc3Fd868558b082a531B2B4", decimals: 18, usdFeed: null },
   WELL: { symbol: "WELL", address: "0xA88594D404727625A9437C3f886C7643872296AE", decimals: 18, usdFeed: null },
   ZORA: { symbol: "ZORA", address: "0x1111111111166b7FE7bd91427724B487980aFc69", decimals: 18, usdFeed: null },
+  cbETH: { symbol: "cbETH", address: "0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cf0DEc22", decimals: 18, usdFeed: null },
+  MORPHO: { symbol: "MORPHO", address: "0xBAa5CC21fd487B8Fcc2F632f3F4E8D37262a0842", decimals: 18, usdFeed: null },
+  LINK: { symbol: "LINK", address: "0x88Fb150BDc53A65fe94Dea0c9BA0a6dAf8C6e196", decimals: 18, usdFeed: null },
+  UNI: { symbol: "UNI", address: "0xc3De830EA07524a0761646a6a4e4be0e114a3C83", decimals: 18, usdFeed: null },
+  COMP: { symbol: "COMP", address: "0x9e1028F5F1D5eDE59748FFceE5532509976840E0", decimals: 18, usdFeed: null },
+  SNX: { symbol: "SNX", address: "0x22e6966B799c4D5B13BE962E1D117b56327FDa66", decimals: 18, usdFeed: null },
+  cbDOGE: { symbol: "cbDOGE", address: "0xcbD06E5A2B0C65597161de254AA074E489dEb510", decimals: 8, usdFeed: null },
+  cbXRP: { symbol: "cbXRP", address: "0xcb585250f852C6c6bf90434AB21A00f02833a4af", decimals: 6, usdFeed: null },
+  PRIME: { symbol: "PRIME", address: "0xfA980cEd6895AC314E7dE34Ef1bFAE90a5AdD21b", decimals: 18, usdFeed: null },
+  KAITO: { symbol: "KAITO", address: "0x98d0baa52b2D063E780DE12F615f963Fe8537553", decimals: 18, usdFeed: null },
+  EURC: { symbol: "EURC", address: "0x60a3E35Cc302bFA44Cb288Bc5a4F316Fdb1adb42", decimals: 6, usdFeed: null },
+  cbLTC: { symbol: "cbLTC", address: "0xcb17C9Db87B595717C857a08468793f5bAb6445F", decimals: 8, usdFeed: null },
 };
 
 /**
@@ -41,6 +53,18 @@ export const COINBASE_PRODUCTS: Record<string, string> = {
   TOSHI: "TOSHI-USD",
   WELL: "WELL-USD",
   ZORA: "ZORA-USD",
+  cbETH: "CBETH-USD",
+  MORPHO: "MORPHO-USD",
+  LINK: "LINK-USD",
+  UNI: "UNI-USD",
+  COMP: "COMP-USD",
+  SNX: "SNX-USD",
+  cbDOGE: "DOGE-USD",
+  cbXRP: "XRP-USD",
+  PRIME: "PRIME-USD",
+  KAITO: "KAITO-USD",
+  EURC: "EURC-USD",
+  cbLTC: "LTC-USD",
 };
 
 /** Base Sepolia: development target for contracts and CRE simulations. */

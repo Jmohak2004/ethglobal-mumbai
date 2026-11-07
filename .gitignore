@@ -20,3 +20,4 @@ cre/**/.env
 .relayer-cursor.json
 contracts/broadcast/**/dry-run/
 cre/**/.cre_build_tmp.js
+.demo-users.json
