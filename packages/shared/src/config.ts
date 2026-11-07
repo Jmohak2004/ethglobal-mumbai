@@ -14,6 +14,7 @@ export const EnvSchema = z.object({
   NETWORK: z.enum(["mainnet", "testnet"]).default("testnet"),
   GLOBAL_KILL_SWITCH: bool(false),
   MAX_TRADE_USD: num(1),
+  MIN_ORDER_USD: num(0.1),
   MAX_AGENT_ALLOCATION_USD: num(5),
   MAX_DAILY_VOLUME_USD_PER_AGENT: num(20),
   MAX_DAILY_LOSS_USD_PER_AGENT: num(1),
@@ -48,6 +49,7 @@ export function loadEnv(source: Record<string, string | undefined> = process.env
 export function globalLimitsFromEnv(env: Env): GlobalLimits {
   return {
     maxTradeUsd: env.MAX_TRADE_USD,
+    minOrderUsd: env.MIN_ORDER_USD,
     maxAgentAllocationUsd: env.MAX_AGENT_ALLOCATION_USD,
     maxDailyVolumeUsdPerAgent: env.MAX_DAILY_VOLUME_USD_PER_AGENT,
     maxDailyLossUsdPerAgent: env.MAX_DAILY_LOSS_USD_PER_AGENT,

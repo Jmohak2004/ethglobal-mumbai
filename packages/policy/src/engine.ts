@@ -184,7 +184,7 @@ function resolveTrailFraction(
 const SELL_ONLY_ORDER_TYPES: FlashOrderType[] = ["bracket", "stop-loss", "take-profit", "trailing-stop", "trailing-stop-limit"];
 
 export function evaluate(proposal: Proposal, ctx: PolicyContext, opts: EvaluateOptions = {}): PolicyVerdict {
-  const minNotional = opts.minNotionalUsd ?? DEFAULT_MIN_NOTIONAL_USD;
+  const minNotional = opts.minNotionalUsd ?? ctx.global.minOrderUsd ?? DEFAULT_MIN_NOTIONAL_USD;
   const maxDev = opts.maxLimitDeviationPct ?? DEFAULT_MAX_LIMIT_DEVIATION_PCT;
   const { config, global } = ctx;
 

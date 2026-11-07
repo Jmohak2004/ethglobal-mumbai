@@ -174,6 +174,8 @@ export type PolicyVerdict =
 
 export interface GlobalLimits {
   maxTradeUsd: number;
+  /** Smallest order the policy engine allows (MIN_ORDER_USD). Below it, fixed per-fill costs dominate. */
+  minOrderUsd?: number;
   maxAgentAllocationUsd: number;
   maxDailyVolumeUsdPerAgent: number;
   maxDailyLossUsdPerAgent: number;

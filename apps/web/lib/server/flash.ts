@@ -121,8 +121,12 @@ export function ticketToIntent(t: TicketInput): OrderIntent {
 
 function assertTicketLimits(t: TicketInput): void {
   const e = env();
-  if (!(t.sizeUsd >= 0.01) || t.sizeUsd > e.MAX_TRADE_USD) {
-    throw new ApiError(422, "VALIDATION", `Size must be between $0.01 and $${e.MAX_TRADE_USD} (MAX_TRADE_USD)`);
+  if (!(t.sizeUsd >= e.MIN_ORDER_USD) || t.sizeUsd > e.MAX_TRADE_USD) {
+    throw new ApiError(
+      422,
+      "VALIDATION",
+      `Size must be between $${e.MIN_ORDER_USD} (MIN_ORDER_USD) and $${e.MAX_TRADE_USD} (MAX_TRADE_USD)`,
+    );
   }
   if (!e.ALLOWED_TOKENS.includes(t.asset)) throw new ApiError(422, "VALIDATION", `${t.asset} is not on the platform allowlist`);
 }
