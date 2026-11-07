@@ -12,7 +12,9 @@ export const MODEL_IDS = {
   reflection: "0gm-1.0-35b-a3b",
   vision: "qwen3-vl-plus",
   image: "z-image-turbo",
-  digest: "glm-5.3-flash",
+  // Digests need JSON mode plus the Router's web plugin. glm-5.3-flash rejects JSON mode (model_not_capable),
+  // and 0gm-1.0 is always end-to-end encrypted, which rules out plugins. qwen3.8-max supports both.
+  digest: "qwen3.8-max",
 } as const;
 
 /** Budget tiers that force the cheap decision model (PRD §6.11.6). "empty" is included so a paused agent never bills the strong model. */

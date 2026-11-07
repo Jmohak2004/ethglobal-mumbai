@@ -11,6 +11,8 @@ export interface ChatJsonRequest {
   maxTokens?: number;
   /** Forwarded to ChatRequest.thinking. */
   thinking?: boolean;
+  /** Forwarded to ChatRequest.plugins. */
+  plugins?: { id: string }[];
 }
 
 export type ChatJsonResult<T> =

@@ -24,14 +24,14 @@ describe("modelFor", () => {
     expect(modelFor("reflection", "strong", "critical")).toBe("0gm-1.0-35b-a3b");
     expect(modelFor("vision", "strong", "healthy")).toBe("qwen3-vl-plus");
     expect(modelFor("image", "strong", "healthy")).toBe("z-image-turbo");
-    expect(modelFor("digest", "strong", "healthy")).toBe("glm-5.3-flash");
+    expect(modelFor("digest", "strong", "healthy")).toBe("qwen3.8-max");
   });
 
   test("registry matches the PRD fallback IDs", () => {
     expect(Object.values(MODEL_IDS.decision)).toEqual(["glm-5.3", "qwen3.8-max", "0gm-1.0-35b-a3b"]);
     expect(MODEL_IDS.vision).toBe("qwen3-vl-plus");
     expect(MODEL_IDS.image).toBe("z-image-turbo");
-    expect(MODEL_IDS.digest).toBe("glm-5.3-flash");
+    expect(MODEL_IDS.digest).toBe("qwen3.8-max");
   });
 });
 

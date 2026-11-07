@@ -66,6 +66,11 @@ export interface ChatRequest {
    * Models that ignore it (e.g. 0gm-1.0) still reason, so callers also leave generous maxTokens.
    */
   thinking?: boolean;
+  /**
+   * Router plugins, e.g. [{ id: "web" }]: the Router runs one web search per request and gives the results to
+   * the model. Works with any chat model, unlike the 0g:web_search tool, which needs tool-calling support.
+   */
+  plugins?: { id: string }[];
 }
 
 export interface ChatCompletionResponse {
@@ -128,6 +133,12 @@ export class ZeroGRouter {
    * reports teeVerified=false, so a decision is never shown as TEE-verified when it wasn't.
    */
   private async post(path: string, body: Record<string, unknown>): Promise<{ res: HttpResult<unknown>; fellBack: boolean }> {
+    // Plugins inject into the prompt, which the Router cannot do for end-to-end-encrypted (verified/private)
+    // requests, so plugin requests go straight to standard mode.
+    if (body.plugins !== undefined && this.trustMode !== "standard") {
+      const { verify_tee: _drop, ...rest } = body;
+      return { res: await httpJson<unknown>(this.httpStandard, "POST", path, { body: rest }), fellBack: true };
+    }
     try {
       return { res: await httpJson<unknown>(this.http, "POST", path, { body }), fellBack: false };
     } catch (err) {
@@ -147,6 +158,7 @@ export class ZeroGRouter {
     if (req.temperature !== undefined) body.temperature = req.temperature;
     if (req.maxTokens !== undefined) body.max_tokens = req.maxTokens;
     if (req.thinking === false) body.enable_thinking = false;
+    if (req.plugins && req.plugins.length > 0) body.plugins = req.plugins;
 
     const { res, fellBack } = await this.post("/chat/completions", body);
     const data = asCompletion(res.data);

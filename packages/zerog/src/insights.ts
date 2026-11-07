@@ -54,6 +54,19 @@ const DigestSchema = z.object({
   summary: z.string().max(600),
 });
 
+const ASSET_NAMES: Record<string, string> = { WETH: "Ethereum (ETH)", ETH: "Ethereum (ETH)", cbBTC: "Bitcoin (BTC)", BTC: "Bitcoin (BTC)" };
+
+/**
+ * The Router's web plugin searches with the user message, so when web search is on the message opens with a
+ * plain-language news query; the collected items follow as JSON.
+ */
+export function digestUserMessage(assets: string[], items: unknown[], useWebSearch: boolean): string {
+  const json = JSON.stringify({ items }, null, 2);
+  if (!useWebSearch) return json;
+  const names = [...new Set(assets.map((a) => ASSET_NAMES[a] ?? a))].join(" and ");
+  return `Latest crypto market news today for ${names}: price moves, ETF flows, regulation, hacks, macro.\n\nCollected items:\n${json}`;
+}
+
 /** Digests raw social and news items into a stance per asset (PRD §6.8). */
 export async function digestInsights(router: ZeroGRouter, input: DigestInput): Promise<InsightDigest> {
   const items = input.items.map((item, i) => ({
@@ -71,9 +84,10 @@ export async function digestInsights(router: ZeroGRouter, input: DigestInput): P
       model: modelFor("digest"),
       messages: [
         { role: "system", content: insightsSystemPrompt(input.assets, input.useWebSearch) },
-        { role: "user", content: JSON.stringify({ items }, null, 2) },
+        { role: "user", content: digestUserMessage(input.assets, items, input.useWebSearch) },
       ],
-      tools: input.useWebSearch ? WEB_TOOLS : undefined,
+      // The web plugin works with any model; the 0g:web_search tool needs tool calling, which 0gm-1.0 lacks.
+      plugins: input.useWebSearch ? [{ id: "web" }] : undefined,
       temperature: 0.2,
       maxTokens: 8192,
       thinking: false,
