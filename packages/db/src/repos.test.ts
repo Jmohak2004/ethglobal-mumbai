@@ -11,6 +11,8 @@ import {
   insertFills,
   insertPaperFill,
   listPaperFillsByFunder,
+  listUnjournaledPaperFills,
+  setFillTxId,
   createTopupIfAbsent,
   forecastHit,
   getChainCursor,
@@ -383,5 +385,60 @@ describe("paper fills (human manual trades in paper mode)", () => {
     expect((await db.query.orders.findFirst({ where: (o, { eq }) => eq(o.id, "live_open") }))?.status).toBe("open");
     expect((await db.query.orders.findFirst({ where: (o, { eq }) => eq(o.id, filled.orderId) }))?.status).toBe("filled");
     expect(await cancelPaperOrders(db, WALLET, [])).toEqual([]);
+  });
+});
+
+describe("trade journal queue", () => {
+  const WALLET = "0x00000000000000000000000000000000000000Cc";
+  const TX = `0x${"ab".repeat(32)}` as const;
+  const paper = (ts: number, extra: Partial<Parameters<typeof insertPaperFill>[1]> = {}) =>
+    insertPaperFill(db, { funderAddress: WALLET, side: "buy", asset: "WETH", orderType: "market", notionalUsd: 1, priceUsd: 2000, feeUsd: 0, integratorFeeUsd: 0, ts, ...extra });
+
+  test("lists unjournaled paper fills oldest first, with the order fields the journal needs", async () => {
+    const late = await paper(3_000, { side: "sell", asset: "cbBTC", priceUsd: 60000, notionalUsd: 2, quoteId: "q-late" });
+    const early = await paper(1_000);
+    const rows = await listUnjournaledPaperFills(db);
+    expect(rows.map((r) => r.fill.id)).toEqual([early.fillId, late.fillId]);
+    expect(rows[1]).toMatchObject({ orderId: late.orderId, agentId: null, funderAddress: WALLET.toLowerCase(), side: "sell", asset: "cbBTC", quoteId: "q-late" });
+    expect(rows[0]?.quoteId).toBeNull();
+  });
+
+  test("skips fills that already have a tx hash and fills from live orders", async () => {
+    const done = await paper(1_000);
+    await setFillTxId(db, [done.fillId], TX);
+    await upsertOrder(db, {
+      id: "flash-live-2",
+      agentId: null,
+      funderAddress: WALLET,
+      side: "buy",
+      asset: "WETH",
+      orderType: "market",
+      notionalUsd: 1,
+      status: "ORDER_STATUS_FILLED",
+      raw: { paper: false },
+      createdAt: 2_000,
+      updatedAt: 2_000,
+    });
+    await insertFills(db, [{ id: "flash-live-2:fill", orderId: "flash-live-2", price: 2000, qty: 0.0005, notionalUsd: 1, feeUsd: 0, integratorFeeUsd: 0, txId: null, ts: 2_000 }]);
+    const pending = await paper(3_000);
+    expect((await listUnjournaledPaperFills(db)).map((r) => r.fill.id)).toEqual([pending.fillId]);
+  });
+
+  test("respects the limit", async () => {
+    await paper(1);
+    await paper(2);
+    await paper(3);
+    expect(await listUnjournaledPaperFills(db, 2)).toHaveLength(2);
+  });
+
+  test("setFillTxId stores the hash once and never overwrites it", async () => {
+    const a = await paper(1);
+    const b = await paper(2);
+    expect(await setFillTxId(db, [a.fillId, b.fillId], TX)).toBe(2);
+    expect(await setFillTxId(db, [a.fillId], `0x${"cd".repeat(32)}`)).toBe(0);
+    expect(await setFillTxId(db, [], TX)).toBe(0);
+    const row = await db.query.fills.findFirst({ where: (f, { eq }) => eq(f.id, a.fillId) });
+    expect(row?.txId).toBe(TX);
+    expect(await listUnjournaledPaperFills(db)).toEqual([]);
   });
 });

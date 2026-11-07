@@ -66,6 +66,8 @@ export const WorkerEnvSchema = EnvSchema.extend({
   TREASURY_ADDRESS: address.optional(),
   PERF_REGISTRY_ADDRESS: address.optional(),
   RISK_ORACLE_ADDRESS: address.optional(),
+  /** TradeJournal on Base Sepolia. Paper fills are journaled here by OPERATOR_PRIVATE_KEY. Unset = journal off. */
+  TRADE_JOURNAL_ADDRESS: address.optional(),
   /** First block to scan for PerformanceReported logs (used when no scan cursor is stored yet). */
   PERF_REGISTRY_FROM_BLOCK: z.coerce.number().int().nonnegative().default(0),
   /** Blocks per eth_getLogs call when scanning PerformanceReported logs. Keeps each call under RPC range limits. */

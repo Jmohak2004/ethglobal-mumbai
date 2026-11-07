@@ -2,14 +2,16 @@
 // Worker CLI.
 //   bun src/index.ts run                 migrate, then scheduler, provisioning, forecast resolver, crash guard, stats/attestation sync,
 //                                        treasury, insight digests (15 min), humans board sync (5 min), reflection loops,
-//                                        runtime status, run-now requests (3 s), paper TP/SL and self-funding (30 s)
+//                                        runtime status, run-now requests (3 s), paper TP/SL and self-funding (30 s),
+//                                        paper trade journal (20 s)
 //   bun src/index.ts relayer             poll TopUpRequested and deposit 0G through the Payment Layer
 //   bun src/index.ts tick <agentId>      one decision tick; prints the episode JSON
 //   bun src/index.ts insights <agentId>  one insight cycle for one agent; prints the run and its digest
 //   bun src/index.ts provision <agentId> run every provisioning step now (ignores backoff); prints the result
+//   bun src/index.ts journal             journal every pending paper fill to TradeJournal now; prints the totals
 //   bun src/index.ts seed-demo           two paper demo agents, only when the database has no agents
 
-import { getAgent, migrate } from "@arena/db";
+import { closeDb, createDb, getAgent, migrate } from "@arena/db";
 import { loadWorkerEnv, type WorkerEnv } from "./env.ts";
 import { createRuntime, loadAgents, type Runtime } from "./runtime.ts";
 import { Scheduler, withDemoTickInterval } from "./scheduler.ts";
@@ -28,12 +30,15 @@ import { seedDemoAgents } from "./seed.ts";
 import { provisionAgent, provisionPass } from "./provisioner.ts";
 import { syncHumans } from "./humans.ts";
 import { INSIGHT_CYCLE_MS } from "./insights/producer.ts";
+import { createJournalRunner, journalChainFromEnv, JOURNAL_BATCH_SIZE, JOURNAL_MAX_BATCHES, runJournalPass } from "./journal.ts";
+import { createLogger } from "./logger.ts";
 import type { Agent, BudgetTier } from "@arena/shared";
 
 const FORECAST_EVERY_MS = 60_000;
 const PROVISION_EVERY_MS = 30_000;
 const RISK_CHECK_EVERY_MS = 30_000;
 const PAPER_MONITOR_EVERY_MS = 30_000;
+const JOURNAL_EVERY_MS = 20_000;
 const RUN_NOW_EVERY_MS = 3_000;
 /** Paused agents stay in the TP/SL monitor: their open brackets still protect positions. */
 const PAPER_MONITOR_STATUSES: Agent["status"][] = ["active", "paused"];
@@ -49,6 +54,7 @@ const USAGE = `usage: bun src/index.ts <command>
   tick <agentId>      run one decision tick and print the episode JSON
   insights <agentId>  run one insight cycle for one agent and print the digest
   provision <agentId> run every provisioning step for one agent now and print the result
+  journal             journal every pending paper fill to TradeJournal and print the totals
   seed-demo           create two paper demo agents when the database is empty`;
 
 /** Paper agents are the ones the platform simulates. modeFor is the same rule the tick uses to pick the execution mode. */
@@ -166,6 +172,11 @@ async function cmdRun(env: WorkerEnv): Promise<void> {
     }
   };
 
+  // Paper trade journal: every paper fill with no journal tx yet is recorded in TradeJournal (Base Sepolia).
+  // Off unless TRADE_JOURNAL_ADDRESS and OPERATOR_PRIVATE_KEY are set.
+  const journal = createJournalRunner({ db, chain: journalChainFromEnv(env), logger: log });
+  const journalPass = () => journal.run().catch((e) => log.error("trade journal pass failed", { error: e }));
+
   // Run now (owner console): claimed requests tick their agents on the scheduler, or directly when it does not hold them.
   let runNowRunning = false;
   const runNow = async () => {
@@ -263,6 +274,7 @@ async function cmdRun(env: WorkerEnv): Promise<void> {
     setInterval(() => void insightCycle().catch((e) => log.error("insight cycle failed", { error: e })), INSIGHT_CYCLE_MS),
     setInterval(() => void humans().catch((e) => log.error("humans board sync failed", { error: e })), HUMANS_EVERY_MS),
     setInterval(() => void paperMonitor().catch((e) => log.error("paper TP/SL monitor failed", { error: e })), PAPER_MONITOR_EVERY_MS),
+    setInterval(() => void journalPass(), JOURNAL_EVERY_MS),
     setInterval(() => void runNow().catch((e) => log.error("run-now poll failed", { error: e })), RUN_NOW_EVERY_MS),
   ];
   // Kick the slow loops off once at startup.
@@ -272,6 +284,7 @@ async function cmdRun(env: WorkerEnv): Promise<void> {
   void attest().catch((e) => log.error("stats or attestation sync failed", { error: e }));
   void insightCycle().catch((e) => log.error("insight cycle failed", { error: e }));
   void humans().catch((e) => log.error("humans board sync failed", { error: e }));
+  void journalPass();
 
   log.info("worker running", { maxConcurrency: env.WORKER_MAX_CONCURRENCY, executionMode: env.EXECUTION_MODE, chain: rt.chain.name });
 
@@ -384,6 +397,36 @@ async function cmdProvision(env: WorkerEnv, agentId: string | undefined): Promis
   return result.status === "failed" ? 1 : 0;
 }
 
+/**
+ * Journals every pending paper fill now, pass after pass, until a pass finds nothing new. Prints the totals.
+ * Exit 1 when the journal is not configured or a transaction failed.
+ */
+async function cmdJournal(env: WorkerEnv): Promise<number> {
+  const chain = journalChainFromEnv(env);
+  if (!chain) {
+    console.error("trade journal disabled: set TRADE_JOURNAL_ADDRESS and OPERATOR_PRIVATE_KEY");
+    return 1;
+  }
+  const db = createDb({ url: env.DATABASE_URL, pgliteDir: env.PGLITE_DIR });
+  await migrate(db);
+  const log = createLogger();
+  const total = { listed: 0, journaled: 0, alreadyOnchain: 0, txHashes: [] as string[] };
+  try {
+    for (;;) {
+      const pass = await runJournalPass({ db, chain, logger: log });
+      total.listed += pass.listed;
+      total.journaled += pass.journaled;
+      total.alreadyOnchain += pass.alreadyOnchain;
+      total.txHashes.push(...pass.txHashes);
+      if (pass.listed < JOURNAL_BATCH_SIZE * JOURNAL_MAX_BATCHES || pass.journaled === 0) break;
+    }
+    console.log(JSON.stringify(total, null, 2));
+    return 0;
+  } finally {
+    await closeDb(db);
+  }
+}
+
 async function cmdSeed(env: WorkerEnv): Promise<number> {
   const rt = createRuntime(env);
   await migrate(rt.db);
@@ -413,6 +456,8 @@ async function main(): Promise<number> {
       return cmdInsights(env, args[0]);
     case "provision":
       return cmdProvision(env, args[0]);
+    case "journal":
+      return cmdJournal(env);
     case "seed-demo":
       return cmdSeed(env);
     default:

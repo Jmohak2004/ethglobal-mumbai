@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { FlashOrderType, OrderIntent } from "@arena/shared";
 import type { Db } from "../client.ts";
 import { fills, orders } from "../schema.ts";
@@ -218,6 +218,57 @@ export async function cancelPaperOrders(db: Db, funderAddress: string, orderIds:
     )
     .returning({ id: orders.id });
   return rows.map((r) => r.id);
+}
+
+/** A paper fill still waiting for its onchain journal tx, with the order fields the journal records. */
+export interface UnjournaledPaperFill {
+  fill: FillRecord;
+  orderId: string;
+  /** Null for a human's manual paper fill. */
+  agentId: string | null;
+  funderAddress: string;
+  side: OrderIntent["side"];
+  asset: string;
+  /** Flash quote id the simulated price came from, when there was one (exits have none). */
+  quoteId: string | null;
+}
+
+/**
+ * Paper fills (agent and human) whose tx_id is still null, oldest first. This is the journal's queue: a fill stays
+ * here until setFillTxId stores its tx hash, so fills from before the journal existed and fills from before a
+ * restart are picked up without any extra state.
+ */
+export async function listUnjournaledPaperFills(db: Db, limit?: number): Promise<UnjournaledPaperFill[]> {
+  const rows = await db
+    .select({ fill: fills, order: orders })
+    .from(fills)
+    .innerJoin(orders, eq(orders.id, fills.orderId))
+    .where(and(isNull(fills.txId), sql`${orders.raw}->>'paper' = 'true'`))
+    .orderBy(asc(fills.ts), asc(fills.id))
+    .limit(clampLimit(limit, 20, 500));
+  return rows.map((r) => ({
+    fill: toFill(r.fill),
+    orderId: r.order.id,
+    agentId: r.order.agentId,
+    funderAddress: r.order.funderAddress,
+    side: r.order.side as OrderIntent["side"],
+    asset: r.order.asset,
+    quoteId: typeof r.order.raw?.quoteId === "string" ? r.order.raw.quoteId : null,
+  }));
+}
+
+/**
+ * Stores the journal tx hash on the given fills. Fills that already hold a tx hash are left alone, so a
+ * re-run never overwrites a settlement or journal tx. Returns the number of fills updated.
+ */
+export async function setFillTxId(db: Db, fillIds: string[], txId: string): Promise<number> {
+  if (fillIds.length === 0) return 0;
+  const rows = await db
+    .update(fills)
+    .set({ txId })
+    .where(and(inArray(fills.id, fillIds), isNull(fills.txId)))
+    .returning({ id: fills.id });
+  return rows.length;
 }
 
 function toFill(row: typeof fills.$inferSelect): FillRecord {
