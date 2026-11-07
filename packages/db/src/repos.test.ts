@@ -10,6 +10,8 @@ import {
   createTopup,
   insertFills,
   insertPaperFill,
+  listRecentFills,
+  fillsSummary,
   listPaperFillsByFunder,
   listUnjournaledPaperFills,
   setFillTxId,
@@ -27,6 +29,7 @@ import {
   listTopupsByAgent,
   markStatsVerified,
   upsertOrder,
+  upsertUser,
   migrate,
   resolveForecast,
   setChainCursor,
@@ -464,5 +467,36 @@ describe("trade journal queue", () => {
     const row = await db.query.fills.findFirst({ where: (f, { eq }) => eq(f.id, a.fillId) });
     expect(row?.txId).toBe(TX);
     expect(await listUnjournaledPaperFills(db)).toEqual([]);
+  });
+});
+
+describe("public trades feed", () => {
+  const WALLET = "0x00000000000000000000000000000000000000Aa";
+  const OTHER = "0x00000000000000000000000000000000000000bb";
+  const TX = H(7);
+  const paper = (funderAddress: string, ts: number) =>
+    insertPaperFill(db, { funderAddress, side: "buy", asset: "WETH", orderType: "market", notionalUsd: 2, priceUsd: 2000, feeUsd: 0, integratorFeeUsd: 0, ts });
+
+  test("listRecentFills is newest first across traders, joins agent and opted-in human names, pages by cursor", async () => {
+    const alpha = await agent("alpha");
+    await upsertUser(db, { address: WALLET, humansBoardOptIn: true });
+    await upsertStats(db, [stats({ entityId: WALLET.toLowerCase(), kind: "human", name: "Ada K.", template: null })]);
+    const a = await paper(WALLET, 1_000);
+    const b = await paper(OTHER, 2_000);
+    await upsertOrder(db, { id: "flash-1", agentId: alpha.id, funderAddress: OWNER, side: "sell", asset: "cbBTC", orderType: "market", notionalUsd: 3, status: "filled", raw: { paper: false }, createdAt: 3_000, updatedAt: 3_000 });
+    await insertFills(db, [{ id: "flash-1:0xabc", orderId: "flash-1", price: 60000, qty: 0.00005, notionalUsd: 3, feeUsd: 0, integratorFeeUsd: 0, txId: TX, ts: 3_000 }]);
+    await setFillTxId(db, [b.fillId], H(8));
+
+    const rows = await listRecentFills(db);
+    expect(rows.map((r) => r.orderId)).toEqual(["flash-1", b.orderId, a.orderId]);
+    expect(rows[0]).toMatchObject({ agentId: alpha.id, agentName: "alpha", paper: false, txId: TX, humanName: null });
+    expect(rows[1]).toMatchObject({ agentId: null, agentName: null, paper: true, txId: H(8), humanName: null });
+    expect(rows[2]).toMatchObject({ paper: true, txId: null, humanName: "Ada K." });
+
+    expect((await listRecentFills(db, { agentId: alpha.id })).map((r) => r.orderId)).toEqual(["flash-1"]);
+    const page = await listRecentFills(db, { limit: 1, before: { ts: rows[0]!.ts, id: rows[0]!.id } });
+    expect(page.map((r) => r.orderId)).toEqual([b.orderId]);
+    expect(await fillsSummary(db)).toEqual({ trades: 3, volumeUsd: 7, journaled: 2 });
+    expect(await fillsSummary(db, { agentId: alpha.id })).toEqual({ trades: 1, volumeUsd: 3, journaled: 1 });
   });
 });

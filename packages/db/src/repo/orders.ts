@@ -1,7 +1,7 @@
-import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import type { FlashOrderType, OrderIntent } from "@arena/shared";
 import type { Db } from "../client.ts";
-import { fills, orders } from "../schema.ts";
+import { agents, agentStats, fills, orders, users } from "../schema.ts";
 import { addr, clampLimit, newId } from "./util.ts";
 
 export interface OrderRecord {
@@ -196,6 +196,86 @@ export async function listPaperFillsByFunder(db: Db, funderAddress: string, limi
     orderType: r.order.orderType as FlashOrderType,
     funderAddress: r.order.funderAddress,
   }));
+}
+
+/** One fill with who made it, for the public trades feed. */
+export interface RecentFill extends FillRecord {
+  asset: string;
+  side: OrderIntent["side"];
+  orderType: FlashOrderType;
+  funderAddress: string;
+  /** Null for a human's manual trade. */
+  agentId: string | null;
+  agentName: string | null;
+  /** A human's display name, only when they opted into the Humans board. Null otherwise (show a short address). */
+  humanName: string | null;
+  /** True for a simulated fill. Its txId is the TradeJournal tx on Base Sepolia. Live fills carry the settlement tx. */
+  paper: boolean;
+}
+
+/** Keyset cursor for listRecentFills: the (ts, id) of the last row of the previous page. */
+export interface FillCursor {
+  ts: number;
+  id: string;
+}
+
+/**
+ * Newest-first fills across every trader (agents and humans), with the order, agent name and, for opted-in humans,
+ * their display name. Optionally one agent only. `before` pages past a cursor (strictly older rows).
+ */
+export async function listRecentFills(
+  db: Db,
+  opts: { limit?: number; agentId?: string; before?: FillCursor } = {},
+): Promise<RecentFill[]> {
+  const conds = [];
+  if (opts.agentId) conds.push(eq(orders.agentId, opts.agentId));
+  if (opts.before) {
+    conds.push(or(lt(fills.ts, opts.before.ts), and(eq(fills.ts, opts.before.ts), lt(fills.id, opts.before.id))));
+  }
+  const rows = await db
+    .select({
+      fill: fills,
+      order: orders,
+      agentName: agents.name,
+      humanName: agentStats.name,
+      optIn: users.humansBoardOptIn,
+    })
+    .from(fills)
+    .innerJoin(orders, eq(orders.id, fills.orderId))
+    .leftJoin(agents, eq(agents.id, orders.agentId))
+    .leftJoin(users, eq(users.address, orders.funderAddress))
+    .leftJoin(agentStats, and(eq(agentStats.entityId, orders.funderAddress), eq(agentStats.kind, "human")))
+    .where(conds.length > 0 ? and(...conds) : undefined)
+    .orderBy(desc(fills.ts), desc(fills.id))
+    .limit(clampLimit(opts.limit, 100, 200));
+  return rows.map((r) => ({
+    ...toFill(r.fill),
+    asset: r.order.asset,
+    side: r.order.side as OrderIntent["side"],
+    orderType: r.order.orderType as FlashOrderType,
+    funderAddress: r.order.funderAddress,
+    agentId: r.order.agentId,
+    agentName: r.agentName ?? null,
+    humanName: r.order.agentId === null && r.optIn ? (r.humanName ?? null) : null,
+    paper: r.order.raw?.paper === true,
+  }));
+}
+
+/** Totals over every fill (or one agent's): count, USD volume and how many already carry a tx hash. */
+export async function fillsSummary(
+  db: Db,
+  opts: { agentId?: string } = {},
+): Promise<{ trades: number; volumeUsd: number; journaled: number }> {
+  const [row] = await db
+    .select({
+      trades: sql<number>`count(*)::int`,
+      volumeUsd: sql<number>`coalesce(sum(${fills.notionalUsd}), 0)::float8`,
+      journaled: sql<number>`count(${fills.txId})::int`,
+    })
+    .from(fills)
+    .innerJoin(orders, eq(orders.id, fills.orderId))
+    .where(opts.agentId ? eq(orders.agentId, opts.agentId) : undefined);
+  return { trades: Number(row?.trades ?? 0), volumeUsd: Number(row?.volumeUsd ?? 0), journaled: Number(row?.journaled ?? 0) };
 }
 
 /**
