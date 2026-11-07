@@ -66,7 +66,12 @@ export function LeaderboardTable({ rows }: { rows: PerformanceStats[] }) {
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: "rank", dir: 1 });
   const [more, setMore] = useState(false);
 
-  const ranked: Row[] = useMemo(() => rows.map((r, i) => ({ r, rank: i + 1 })), [rows]);
+  // Entries with trades rank first; the rest keep their order below them (a $0.00 with no trades is not a result).
+  const ranked: Row[] = useMemo(
+    () =>
+      [...rows.filter((r) => r.trades > 0), ...rows.filter((r) => r.trades === 0)].map((r, i) => ({ r, rank: i + 1 })),
+    [rows],
+  );
 
   const sorted = useMemo(() => {
     const val = (x: Row): number | string => {
@@ -168,17 +173,27 @@ export function LeaderboardTable({ rows }: { rows: PerformanceStats[] }) {
 
       {/* Tablet and desktop: a table with plain-language headers. */}
       <div className="hidden md:block">
-        <Table scroll={more}>
+        <Table>
           <THead>
             <tr>
               {cols.map((c) => (
                 <TH key={c.key} align={c.align} className="p-0">
-                  <div className={clsx("flex items-center gap-1 px-3", c.align === "right" && "justify-end", c.key === "rank" && "pl-4")}>
+                  {/* Right-aligned columns put the icon and sort arrow before the label, so the label lines up with the numbers. */}
+                  <div
+                    className={clsx(
+                      "flex items-center gap-1 px-3",
+                      c.align === "right" && "flex-row-reverse justify-start",
+                      c.key === "rank" && "pl-4",
+                    )}
+                  >
                     <button
                       type="button"
                       onClick={() => onSort(c.key)}
                       aria-label={`Sort by ${SORT_LABEL[c.key]}`}
-                      className="inline-flex h-10 items-center gap-1 rounded-md text-xs font-medium text-muted transition-colors duration-100 hover:text-text"
+                      className={clsx(
+                        "inline-flex h-10 items-center gap-1 rounded-md text-xs font-medium text-muted transition-colors duration-100 hover:text-text",
+                        c.align === "right" && "flex-row-reverse",
+                      )}
                     >
                       {c.label}
                       <span aria-hidden className={clsx("text-[9px]", sort.key === c.key ? "text-text" : "text-transparent")}>
@@ -193,7 +208,7 @@ export function LeaderboardTable({ rows }: { rows: PerformanceStats[] }) {
                   </div>
                 </TH>
               ))}
-              <TH align="left">Badges</TH>
+              <TH align="left" className="w-px">Badges</TH>
             </tr>
           </THead>
           <tbody>
@@ -220,7 +235,7 @@ export function LeaderboardTable({ rows }: { rows: PerformanceStats[] }) {
                   </TD>
                   <TD align="right" className={pnlClass(r.totalPnlUsd)}>
                     {fmtPnlUsd(r.totalPnlUsd)}
-                    <div className="num text-xs font-normal text-muted">{fmtPnlBreakdown(r)}</div>
+                    {r.trades > 0 ? <div className="num text-xs font-normal text-muted">{fmtPnlBreakdown(r)}</div> : null}
                   </TD>
                   <TD align="right">{fmtBps(r.winRateBps)}</TD>
                   <TD align="right">{r.trades}</TD>
