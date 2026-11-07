@@ -12,6 +12,7 @@ export const GET = route(async () => {
   const e = env();
   const info: PlatformInfo = {
     executionMode: e.EXECUTION_MODE,
+    allowedTokens: e.ALLOWED_TOKENS,
     network: e.NETWORK,
     flashLive: flashLive(),
     platformZgKey: Boolean(e.ZG_API_KEY),

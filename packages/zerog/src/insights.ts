@@ -54,7 +54,18 @@ const DigestSchema = z.object({
   summary: z.string().max(600),
 });
 
-const ASSET_NAMES: Record<string, string> = { WETH: "Ethereum (ETH)", ETH: "Ethereum (ETH)", cbBTC: "Bitcoin (BTC)", BTC: "Bitcoin (BTC)" };
+const ASSET_NAMES: Record<string, string> = {
+  WETH: "Ethereum (ETH)",
+  ETH: "Ethereum (ETH)",
+  cbBTC: "Bitcoin (BTC)",
+  BTC: "Bitcoin (BTC)",
+  AERO: "Aerodrome (AERO)",
+  VIRTUAL: "Virtuals (VIRTUAL)",
+  DEGEN: "Degen (DEGEN)",
+  TOSHI: "Toshi (TOSHI)",
+  WELL: "Moonwell (WELL)",
+  ZORA: "Zora (ZORA)",
+};
 
 /**
  * The Router's web plugin searches with the user message, so when web search is on the message opens with a

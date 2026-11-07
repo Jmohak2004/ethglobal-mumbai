@@ -1,14 +1,12 @@
 // Live candles for /trade from Coinbase Exchange public market data. Server-only.
 // Coinbase rows are [time, low, high, open, close, volume], newest first. Output is ascending Candle[] with
 // unix-ms times. A 30 s in-memory cache per asset and granularity keeps us well under the public rate limit.
-import type { Candle, Indicators } from "@arena/shared";
+import { COINBASE_PRODUCTS, type Candle, type Indicators } from "@arena/shared";
 
 import { ApiError } from "@/lib/server/errors";
 import type { MarketResponse } from "@/lib/types";
 
 const COINBASE_EXCHANGE = "https://api.exchange.coinbase.com";
-/** Allowlisted trade assets mapped to their Coinbase Exchange product. */
-const PRODUCT: Record<string, string> = { WETH: "ETH-USD", cbBTC: "BTC-USD" };
 /** Granularities Coinbase accepts (seconds). */
 export const GRANULARITIES = [60, 300, 900, 3600, 21600, 86400] as const;
 export const DEFAULT_GRANULARITY = 300;
@@ -24,8 +22,9 @@ interface CacheEntry {
 const cache = new Map<string, CacheEntry>();
 const inflight = new Map<string, Promise<MarketResponse>>();
 
+/** True for tickers with a Coinbase product (every tradable ticker in @arena/shared). */
 export function isTradeAsset(asset: string): boolean {
-  return Object.hasOwn(PRODUCT, asset);
+  return Object.hasOwn(COINBASE_PRODUCTS, asset);
 }
 
 export function isGranularity(n: number): n is (typeof GRANULARITIES)[number] {
@@ -37,7 +36,7 @@ export function isGranularity(n: number): n is (typeof GRANULARITIES)[number] {
  * value exists, the older value is served instead of an error. Throws ApiError(502) when there is nothing to serve.
  */
 export async function loadMarket(asset: string, granularity: number = DEFAULT_GRANULARITY): Promise<MarketResponse> {
-  const product = Object.hasOwn(PRODUCT, asset) ? PRODUCT[asset] : undefined;
+  const product = isTradeAsset(asset) ? COINBASE_PRODUCTS[asset] : undefined;
   if (!product) throw new ApiError(404, "NOT_FOUND", `Unknown asset ${asset}`);
   const key = `${asset}:${granularity}`;
   const hit = cache.get(key);
@@ -86,6 +85,7 @@ async function fetchMarket(asset: string, product: string, granularity: number):
 
   return {
     asset,
+    product,
     granularity,
     priceUsd: last.c,
     ts: Date.now(),

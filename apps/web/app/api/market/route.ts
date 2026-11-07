@@ -6,8 +6,8 @@ import { DEFAULT_GRANULARITY, GRANULARITIES, isGranularity, isTradeAsset, loadMa
 export const dynamic = "force-dynamic";
 
 /**
- * GET /api/market?asset=WETH|cbBTC&granularity=300. Public Coinbase candles (ascending) with last price and 24h
- * change. Cached for 30 s on the server.
+ * GET /api/market?asset=<ticker>&granularity=300. Any ticker with a Coinbase product (WETH, cbBTC, AERO, VIRTUAL,
+ * DEGEN, TOSHI, WELL, ZORA). Public Coinbase candles (ascending) with last price and 24h change. Cached for 30 s.
  */
 export const GET = route(async (req: Request) => {
   const sp = new URL(req.url).searchParams;

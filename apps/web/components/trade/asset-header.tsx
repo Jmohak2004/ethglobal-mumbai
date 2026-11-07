@@ -5,8 +5,6 @@ import { Segmented } from "@/components/ui/segmented";
 import { Tooltip } from "@/components/ui/tooltip";
 import { fmtAmount, fmtPct, pnlClass, shortAddr } from "@/lib/format";
 
-const FEED_LABEL: Record<string, string> = { WETH: "ETH/USD", cbBTC: "BTC/USD" };
-
 export function AssetHeader({
   market,
   assets,
@@ -20,7 +18,8 @@ export function AssetHeader({
   onAsset: (a: string) => void;
   activeAsset: string;
 }) {
-  const feedLabel = FEED_LABEL[market.asset] ?? "USD";
+  // Base symbol from the Coinbase product (ETH for WETH, BTC for cbBTC, AERO for AERO-USD).
+  const base = market.product.split("-")[0] ?? market.asset;
   return (
     <div className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-md border border-border bg-panel px-3 py-2">
       <Segmented
@@ -44,17 +43,18 @@ export function AssetHeader({
           align="end"
           content={
             <div className="flex flex-col gap-0.5">
-              <div className="font-medium">Chainlink Data Feed (Base)</div>
+              <div className="font-medium">{feedAddress ? "Chainlink Data Feed (Base)" : "No Chainlink feed on Base"}</div>
               <div className="text-muted">
-                Mark price reference. Stop and TP triggers are evaluated by Flash, not by this feed.
+                {feedAddress
+                  ? "Mark price reference. Stop and TP triggers are evaluated by Flash, not by this feed."
+                  : "Mark price is the last Coinbase candle close. Stop and TP triggers are evaluated by Flash."}
               </div>
               <div className="text-muted">Last price and 24h stats: Coinbase Exchange, 5m candles, refreshed every 15 s.</div>
             </div>
           }
         >
           <span className="num rounded border border-border px-2 py-1 text-[11px] text-muted">
-            Chainlink {feedLabel}
-            {feedAddress ? ` · ${shortAddr(feedAddress, 6, 4)}` : ""}
+            {feedAddress ? `Chainlink ${base}/USD · ${shortAddr(feedAddress, 6, 4)}` : `Mark: Coinbase ${market.product}`}
           </span>
         </Tooltip>
       </div>

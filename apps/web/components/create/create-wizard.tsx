@@ -15,7 +15,7 @@ import { useToast } from "@/components/ui/toast";
 import { describeError, postJson, ApiClientError } from "@/lib/api";
 import { usePlatform } from "@/lib/hooks/use-platform";
 import { useSession } from "@/lib/hooks/use-session";
-import { DEMO_OWNER, TEMPLATES, defaultStrategy, validateCreateInput } from "@/lib/templates";
+import { DEFAULT_ASSET_ALLOWLIST, DEMO_OWNER, TEMPLATES, defaultStrategy, validateCreateInput } from "@/lib/templates";
 
 export interface AgentOption {
   id: string;
@@ -30,6 +30,7 @@ export function CreateWizard({ agents, demo }: { agents: AgentOption[]; demo: bo
   const session = useSession({ prompt: false });
   const platform = usePlatform();
   const liveAvailable = platform.data?.executionMode === "live";
+  const allowedAssets = platform.data?.allowedTokens ?? DEFAULT_ASSET_ALLOWLIST;
 
   const [step, setStep] = useState<1 | 2>(1);
   const [name, setName] = useState("");
@@ -43,8 +44,8 @@ export function CreateWizard({ agents, demo }: { agents: AgentOption[]; demo: bo
   const usingDemo = owner === DEMO_OWNER && !session.signedIn;
 
   const check = useMemo(
-    () => validateCreateInput({ name, ownerAddress: owner ?? "", config }),
-    [name, owner, config],
+    () => validateCreateInput({ name, ownerAddress: owner ?? "", config }, allowedAssets),
+    [name, owner, config, allowedAssets],
   );
   // The owner check is handled by the sign-in gate below, so drop it from the list.
   const precheckErrors = check.ok ? [] : check.errors.filter((e) => !e.startsWith("ownerAddress"));
@@ -155,6 +156,7 @@ export function CreateWizard({ agents, demo }: { agents: AgentOption[]; demo: bo
               live={live}
               onLive={setLive}
               liveAvailable={liveAvailable}
+              assets={allowedAssets}
             />
           </div>
 

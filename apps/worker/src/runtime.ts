@@ -122,7 +122,12 @@ export function createRuntime(env: WorkerEnv, overrides: RuntimeOverrides = {}):
   const client = publicClientFor(chain);
   const zgBaseUrl = env.ZG_ROUTER_URL ?? ZG_ROUTER_URL[env.NETWORK];
 
-  const market = createMarketData({ feed: chainlinkFeedReader(client, chain), clock, logger });
+  const market = createMarketData({
+    feed: chainlinkFeedReader(client, chain),
+    hasFeed: (asset) => Boolean(chain.tokens[asset]?.usdFeed),
+    clock,
+    logger,
+  });
 
   const riskAddress = env.RISK_ORACLE_ADDRESS as Hex | undefined;
   const risk = createRiskSource({

@@ -102,6 +102,8 @@ export interface AgentView extends PublicAgent {
 
 /** Live market for /trade: Coinbase Exchange candles (ascending) with 24h stats. */
 export interface MarketResponse extends MarketSnapshot {
+  /** Coinbase Exchange product the candles come from, e.g. "AERO-USD". */
+  product: string;
   granularity: number;
   change24hPct: number;
   high24h: number;
@@ -270,6 +272,8 @@ export interface SessionInfo {
 /** Public platform settings (no secrets). */
 export interface PlatformInfo {
   executionMode: ExecutionMode;
+  /** Platform asset allowlist (ALLOWED_TOKENS). The create form and the trade page list these. */
+  allowedTokens: string[];
   network: "mainnet" | "testnet";
   /** Flash submission is possible: EXECUTION_MODE=live and DEFINITIVE_API_KEY set. */
   flashLive: boolean;

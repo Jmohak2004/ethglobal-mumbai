@@ -3,7 +3,7 @@
 // Results are cached for 30 s per asset. The fetch, the feed read and the clock are all injected.
 
 import { computeIndicators } from "@arena/policy";
-import type { Candle, MarketSnapshot } from "@arena/shared";
+import { COINBASE_PRODUCTS, type Candle, type MarketSnapshot } from "@arena/shared";
 import { parseAbi, type PublicClient } from "viem";
 import type { Clock, MarketData } from "./deps.ts";
 import type { ChainConfig } from "./chain.ts";
@@ -11,7 +11,6 @@ import type { Logger } from "./logger.ts";
 import { silentLogger } from "./logger.ts";
 
 export const COINBASE_API_URL = "https://api.exchange.coinbase.com";
-export const COINBASE_PRODUCTS: Record<string, string> = { WETH: "ETH-USD", cbBTC: "BTC-USD" };
 export const CANDLE_GRANULARITY_SEC = 300;
 export const MARKET_CACHE_MS = 30_000;
 
@@ -69,6 +68,8 @@ interface CacheEntry<T> {
 export interface MarketDataOptions {
   /** Null when no RPC is configured. The candle close is used as the price. */
   feed: FeedReader | null;
+  /** Whether the configured chain has a Chainlink feed for this asset. Assets without one skip the feed read. */
+  hasFeed?: (asset: string) => boolean;
   fetch?: FetchLike;
   clock: Clock;
   logger?: Logger;
@@ -86,7 +87,7 @@ export function createMarketData(opts: MarketDataOptions): MarketData {
     entry && opts.clock.now() - entry.at < cacheMs ? entry.value : null;
 
   async function feedPrice(asset: string): Promise<number | null> {
-    if (!opts.feed) return null;
+    if (!opts.feed || (opts.hasFeed && !opts.hasFeed(asset))) return null;
     try {
       const { priceUsd } = await opts.feed(asset);
       return Number.isFinite(priceUsd) && priceUsd > 0 ? priceUsd : null;

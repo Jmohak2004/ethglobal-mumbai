@@ -174,7 +174,7 @@ describe("insight producer: per-agent 0G key", () => {
     expect(run.itemsStored).toBe(1);
     expect(keysUsed).toEqual(["sk-agent-own"]);
     expect(digest.requests).toHaveLength(1);
-    expect(digest.requests[0]?.tools).toBeDefined();
+    expect(digest.requests[0]?.plugins).toEqual([{ id: "web" }]);
 
     const items = await db.query.insightItems.findMany();
     expect(items).toHaveLength(1);

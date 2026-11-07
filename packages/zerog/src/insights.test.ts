@@ -10,4 +10,9 @@ describe("digestUserMessage", () => {
   test("is just the items JSON without web search", () => {
     expect(digestUserMessage(["WETH"], [], false)).toBe(JSON.stringify({ items: [] }, null, 2));
   });
+  test("names the Base tokens by project", () => {
+    const msg = digestUserMessage(["AERO", "VIRTUAL", "DEGEN", "TOSHI", "WELL", "ZORA"], [], true);
+    expect(msg).toContain("Aerodrome (AERO) and Virtuals (VIRTUAL) and Degen (DEGEN) and Toshi (TOSHI)");
+    expect(msg).toContain("Moonwell (WELL) and Zora (ZORA)");
+  });
 });

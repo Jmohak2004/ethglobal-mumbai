@@ -12,7 +12,6 @@ import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/ui/panel";
 import { Segmented } from "@/components/ui/segmented";
 import { getJson } from "@/lib/api";
-import { ASSET_ALLOWLIST } from "@/lib/templates";
 import type { MarketResponse, TradingActivity } from "@/lib/types";
 
 /** 5-minute candles, polled every 15 s. The server caches upstream for 30 s. */
@@ -20,14 +19,16 @@ const GRANULARITY = 300;
 const POLL_MS = 15_000;
 
 interface Props {
+  /** Platform allowlist with market data, in display order. */
+  assets: string[];
   initialMarkets: Record<string, MarketResponse | null>;
   activity: TradingActivity;
   feeds: Record<string, string | null>;
 }
 
 /** Hyperliquid-style terminal: asset header, chart + bottom panel on the left, order ticket on the right. */
-export function TradeTerminal({ initialMarkets, activity, feeds }: Props) {
-  const [asset, setAsset] = useState<string>(ASSET_ALLOWLIST[0] ?? "WETH");
+export function TradeTerminal({ assets, initialMarkets, activity, feeds }: Props) {
+  const [asset, setAsset] = useState<string>(assets[0] ?? "WETH");
   const [aiOpen, setAiOpen] = useState(false);
   const [prefill, setPrefill] = useState<{ nonce: number; values: TicketPrefill } | null>(null);
 
@@ -47,13 +48,13 @@ export function TradeTerminal({ initialMarkets, activity, feeds }: Props) {
           {data ? (
             <AssetHeader
               market={data}
-              assets={[...ASSET_ALLOWLIST]}
+              assets={assets}
               feedAddress={feeds[data.asset] ?? null}
               onAsset={setAsset}
               activeAsset={asset}
             />
           ) : (
-            <Segmented value={asset} options={ASSET_ALLOWLIST.map((a) => ({ value: a, label: a }))} onChange={setAsset} />
+            <Segmented value={asset} options={assets.map((a) => ({ value: a, label: a }))} onChange={setAsset} />
           )}
         </div>
         <Button variant="secondary" className="h-9" disabled={!data} onClick={() => setAiOpen(true)}>

@@ -12,7 +12,6 @@ import { Segmented } from "@/components/ui/segmented";
 import { Slider } from "@/components/ui/slider";
 import { fmtPct } from "@/lib/format";
 import {
-  ASSET_ALLOWLIST,
   COMMISSION_BPS,
   CRASH_MODES,
   DEMO_CAPS,
@@ -33,12 +32,14 @@ interface ConfigFormProps {
   onLive: (v: boolean) => void;
   /** False when the server is not in EXECUTION_MODE=live. The agent is then created in paper mode. */
   liveAvailable: boolean;
+  /** Platform asset allowlist (ALLOWED_TOKENS), one chip each. */
+  assets: readonly string[];
 }
 
 const SHARED_CAP_HINT = (cap: number) => `Demo cap $${cap}`;
 
 /** Every control for a StrategyConfig, grouped into panels. Limits clamp to demo caps; sliders flag out-of-range values. */
-export function ConfigForm({ config, onChange, name, onName, agents, live, onLive, liveAvailable }: ConfigFormProps) {
+export function ConfigForm({ config, onChange, name, onName, agents, live, onLive, liveAvailable, assets }: ConfigFormProps) {
   const tpl = getTemplate(config.template);
   const patch = (p: Partial<StrategyConfig>) => onChange({ ...config, ...p });
   const setLimit = (p: Partial<AgentLimits>) => patch({ limits: { ...config.limits, ...p } });
@@ -118,7 +119,7 @@ export function ConfigForm({ config, onChange, name, onName, agents, live, onLiv
           <div className="flex flex-col gap-2">
             <div className="text-[12px] text-text">Assets (platform allowlist)</div>
             <div className="flex flex-wrap gap-1.5">
-              {ASSET_ALLOWLIST.map((a) => {
+              {assets.map((a) => {
                 const on = config.assets.includes(a);
                 return (
                   <button

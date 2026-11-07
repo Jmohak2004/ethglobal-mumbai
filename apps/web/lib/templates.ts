@@ -120,7 +120,11 @@ export function getTemplate(id: string): TemplateDef | undefined {
 
 // ---- Platform limits (mirror EnvSchema defaults in @arena/shared config) ----
 
-export const ASSET_ALLOWLIST: string[] = ["WETH", "cbBTC"];
+/**
+ * Client fallback for the asset chips and the pre-check, used until /api/platform answers. The live list is the
+ * server's ALLOWED_TOKENS env, which the server re-validates with @arena/policy.
+ */
+export const DEFAULT_ASSET_ALLOWLIST: readonly string[] = ["WETH", "cbBTC"];
 
 /** Demo caps. Create-form inputs clamp to these; the server enforces the live env values. */
 export const DEMO_CAPS = {
@@ -217,7 +221,7 @@ export type ValidationResult = { ok: true; value: CreateInput } | { ok: false; e
 const inRange = (v: unknown, lo: number, hi: number): v is number =>
   typeof v === "number" && Number.isFinite(v) && v >= lo && v <= hi;
 
-export function validateCreateInput(input: unknown): ValidationResult {
+export function validateCreateInput(input: unknown, allowedAssets: readonly string[] = DEFAULT_ASSET_ALLOWLIST): ValidationResult {
   const errors: string[] = [];
   const o = (input ?? {}) as Partial<CreateInput>;
   const c = (o.config ?? {}) as Partial<StrategyConfig>;
@@ -233,7 +237,7 @@ export function validateCreateInput(input: unknown): ValidationResult {
 
   const assets = Array.isArray(c.assets) ? c.assets : [];
   if (assets.length === 0) errors.push("pick at least one asset");
-  for (const a of assets) if (!ASSET_ALLOWLIST.includes(a)) errors.push(`asset ${a} is not allowlisted`);
+  for (const a of assets) if (!allowedAssets.includes(a)) errors.push(`asset ${a} is not allowlisted`);
 
   if (tpl) {
     const sliders = (c.sliders ?? {}) as Record<string, unknown>;

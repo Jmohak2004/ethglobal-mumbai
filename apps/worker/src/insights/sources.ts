@@ -247,7 +247,7 @@ const ORDER_VALUE_KEYS = ["sizePct", "limitPrice", "triggerPrice", "takeProfitPc
 export function redactOrderValues(text: string, proposal: Partial<Proposal>): string {
   let out = text
     .replace(/\$\s?\d[\d,]*(?:\.\d+)?/g, "[redacted]")
-    .replace(/\b\d[\d,]*(?:\.\d+)?\s?(?:USDC|USDT|USD|WETH|ETH|cbBTC|BTC)\b/gi, "[redacted]");
+    .replace(/\b\d[\d,]*(?:\.\d+)?\s?(?:USDC|USDT|USD|WETH|ETH|cbBTC|BTC|AERO|VIRTUAL|DEGEN|TOSHI|WELL|ZORA)\b/gi, "[redacted]");
   for (const key of ORDER_VALUE_KEYS) {
     const value = proposal[key];
     if (typeof value !== "number" || !Number.isFinite(value) || value === 0) continue;
@@ -323,7 +323,7 @@ export async function collectAgentCommentary(opts: CommentaryOptions, sourceAgen
 }
 
 // ---------------------------------------------------------------------------
-// Asset matching (PRD 6.8: ETH/Ether/WETH, BTC/Bitcoin/cbBTC)
+// Asset matching (PRD 6.8: ETH/Ether/WETH, BTC/Bitcoin/cbBTC; Base tokens by ticker and project name)
 // ---------------------------------------------------------------------------
 
 const ASSET_TERMS: Record<string, string[]> = {
@@ -331,7 +331,19 @@ const ASSET_TERMS: Record<string, string[]> = {
   ETH: ["ETH", "Ether", "Ethereum", "WETH"],
   cbBTC: ["cbBTC", "BTC", "Bitcoin"],
   BTC: ["BTC", "Bitcoin", "cbBTC"],
+  AERO: ["AERO", "Aerodrome"],
+  VIRTUAL: ["VIRTUAL", "Virtuals"],
+  DEGEN: ["DEGEN", "Degen"],
+  TOSHI: ["TOSHI", "Toshi"],
+  WELL: ["WELL", "Moonwell"],
+  ZORA: ["ZORA", "Zora"],
 };
+
+/**
+ * Terms that match only in this exact case. "well", "degen" and "virtual" are ordinary words in news text, so their
+ * tickers match only in capitals and the project name "Degen" only when capitalised.
+ */
+const EXACT_CASE_TERMS = new Set(["AERO", "VIRTUAL", "DEGEN", "Degen", "TOSHI", "WELL", "ZORA"]);
 
 const escapeRegExp = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -339,7 +351,10 @@ const escapeRegExp = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\
 export function assetsMentioned(text: string, assets: string[]): string[] {
   return assets.filter((asset) => {
     const terms = ASSET_TERMS[asset] ?? [asset];
-    return terms.some((term) => new RegExp(`(?<![A-Za-z0-9])${escapeRegExp(term)}(?![A-Za-z0-9])`, "i").test(text));
+    return terms.some((term) => {
+      const flags = EXACT_CASE_TERMS.has(term) ? "" : "i";
+      return new RegExp(`(?<![A-Za-z0-9])${escapeRegExp(term)}(?![A-Za-z0-9])`, flags).test(text);
+    });
   });
 }
 

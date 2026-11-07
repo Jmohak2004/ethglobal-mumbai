@@ -171,6 +171,24 @@ describe("assetsMentioned", () => {
     expect(assetsMentioned("Wethering the storm", assets)).toEqual([]);
     expect(assetsMentioned("Ethereal mood", assets)).toEqual([]);
   });
+
+  test("matches the Base token tickers and project names", () => {
+    const assets = ["AERO", "VIRTUAL", "DEGEN", "TOSHI", "WELL", "ZORA"];
+    expect(assetsMentioned("Aerodrome liquidity grows", assets)).toEqual(["AERO"]);
+    expect(assetsMentioned("Virtuals agents ship", assets)).toEqual(["VIRTUAL"]);
+    expect(assetsMentioned("Degen season, DEGEN up 20%", assets)).toEqual(["DEGEN"]);
+    expect(assetsMentioned("Toshi on Base", assets)).toEqual(["TOSHI"]);
+    expect(assetsMentioned("Moonwell lending rates", assets)).toEqual(["WELL"]);
+    expect(assetsMentioned("Zora creator coins", assets)).toEqual(["ZORA"]);
+  });
+
+  test("ordinary words do not match the short tickers", () => {
+    const assets = ["AERO", "VIRTUAL", "DEGEN", "WELL", "ZORA"];
+    expect(assetsMentioned("It is going well as expected", assets)).toEqual([]);
+    expect(assetsMentioned("a virtual meeting about the market", assets)).toEqual([]);
+    expect(assetsMentioned("degen traders are back", assets)).toEqual([]);
+    expect(assetsMentioned("Aero bikes for sale", assets)).toEqual([]);
+  });
 });
 
 describe("redactOrderValues", () => {
