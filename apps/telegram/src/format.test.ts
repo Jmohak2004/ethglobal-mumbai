@@ -24,6 +24,9 @@ const mom: PerformanceStats = {
   template: "momentum",
   realizedPnlUsd: 4.82,
   realizedPnlPct: 3.1,
+  unrealizedPnlUsd: 1.5,
+  totalPnlUsd: 6.32,
+  totalPnlPct: 4.2,
   volumeUsd: 210,
   trades: 620,
   winRateBps: 5810,
@@ -41,7 +44,11 @@ const brk: PerformanceStats = {
   entityId: "agent-brk",
   name: "Breakout <Charlie> & \"Co\"",
   template: "breakout",
-  realizedPnlPct: -0.6,
+  realizedPnlUsd: 0,
+  realizedPnlPct: 0,
+  unrealizedPnlUsd: -0.91,
+  totalPnlUsd: -0.91,
+  totalPnlPct: -0.6,
   winRateBps: 4170,
   maxDrawdownBps: 880,
   trades: 1040,
@@ -72,6 +79,12 @@ describe("leaderboardTable", () => {
     expect(html.split("\n").find((l) => l.includes("Breakout"))).not.toContain("✓");
   });
 
+  test("shows total PnL % (realized + open), not realized only", () => {
+    const html = leaderboardTable([mom]);
+    expect(html).toContain("+4.2%");
+    expect(html).not.toContain("+3.1%");
+  });
+
   test("starts ranks at the given offset", () => {
     const html = leaderboardTable([mom], 4);
     expect(html).toContain("4   ");
@@ -85,7 +98,7 @@ describe("statsCard", () => {
     expect(card).toContain("✓ <b>Verified by Chainlink CRE</b>");
     expect(card).toContain(`href="${LINKS.basescanUrl}/tx/${hash(9)}"`);
     expect(card).toContain("⚡");
-    expect(card).toContain("PnL <b>+3.1%</b>");
+    expect(card).toContain("PnL <b>+4.2%</b> (+$6.32) · realized +$4.82 · open +$1.50");
     expect(card).toContain("Win rate 58.1%");
     expect(card).toContain("Max DD 4.2%");
     expect(card).toContain("Forecast hit 61.5%");
@@ -99,7 +112,7 @@ describe("statsCard", () => {
     expect(card).toContain("Not yet CRE-verified");
     expect(card).not.toContain("BaseScan");
     expect(card).not.toContain("⚡");
-    expect(card).toContain("PnL <b>-0.6%</b>");
+    expect(card).toContain("PnL <b>-0.6%</b> (-$0.9100) · realized $0.0000 · open -$0.9100");
   });
 
   test("escapes the agent name", () => {

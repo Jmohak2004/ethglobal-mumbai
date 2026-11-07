@@ -193,6 +193,39 @@ describe("humans board sync", () => {
     expect((await leaderboard(db, { kind: "human" })).map((r) => r.entityId)).not.toContain(CAROL);
   });
 
+  test("marks open lots to the live price: total = realized + unrealized, one price lookup per asset, ranked by total", async () => {
+    const db = await openDb();
+    const clock = fixedClock();
+    const flash = fakeFlash(scenario());
+    await syncHumans({ db, flash: flash as unknown as Pick<FlashClient, "listAllOrders" | "getOrder">, clock, logger: silentLogger });
+
+    const calls: string[] = [];
+    const market = { getPrice: async (asset: string) => (calls.push(asset), 1200) };
+    await recomputeHumanStats({ db, clock, logger: silentLogger, market });
+    expect(calls).toEqual(["WETH"]);
+
+    const rows = await leaderboard(db, { kind: "human" });
+    // Bob holds 2 WETH bought at 1000: +400 open, nothing realized, over 2000 bought.
+    expect(rows.map((r) => r.entityId)).toEqual([BOB, ALICE]);
+    expect(rows[0]).toMatchObject({ realizedPnlUsd: 0, unrealizedPnlUsd: 400, totalPnlUsd: 400 });
+    expect(rows[0]?.totalPnlPct).toBeCloseTo(20, 9);
+    // Alice closed her only position: total equals realized.
+    expect(rows[1]?.unrealizedPnlUsd).toBe(0);
+    expect(rows[1]?.totalPnlUsd).toBeCloseTo(rows[1]?.realizedPnlUsd ?? NaN, 9);
+  });
+
+  test("a failed price lookup leaves the asset unmarked and does not stop the pass", async () => {
+    const db = await openDb();
+    const clock = fixedClock();
+    const flash = fakeFlash(scenario());
+    await syncHumans({ db, flash: flash as unknown as Pick<FlashClient, "listAllOrders" | "getOrder">, clock, logger: silentLogger });
+
+    const market = { getPrice: async (): Promise<number> => { throw new Error("coinbase down"); } };
+    expect(await recomputeHumanStats({ db, clock, logger: silentLogger, market })).toBe(2);
+    const bob = (await leaderboard(db, { kind: "human" })).find((r) => r.entityId === BOB);
+    expect(bob).toMatchObject({ unrealizedPnlUsd: 0, totalPnlUsd: 0 });
+  });
+
   test("the display name falls back to a short address", () => {
     expect(humanDisplayName({ address: BOB, displayName: null })).toBe("0xbbbb...bbbb");
     expect(humanDisplayName({ address: BOB, displayName: "  " })).toBe("0xbbbb...bbbb");

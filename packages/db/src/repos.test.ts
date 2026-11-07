@@ -125,6 +125,30 @@ describe("upsertStats keeps fields that are not provided", () => {
   });
 });
 
+describe("total PnL", () => {
+  test("defaults to realized when unrealized is not given, and unrealized defaults to 0", async () => {
+    await upsertStats(db, [stats({ entityId: "t1", realizedPnlUsd: 3, realizedPnlPct: 30 })]);
+    const row = await statsRow("t1");
+    expect(row?.unrealizedPnlUsd).toBe(0);
+    expect(row?.totalPnlUsd).toBe(3);
+    expect(row?.totalPnlPct).toBe(30);
+  });
+
+  test("stores explicit unrealized and total, and the leaderboard ranks by total", async () => {
+    await upsertStats(db, [
+      stats({ entityId: "realized-only", realizedPnlUsd: 5 }),
+      stats({ entityId: "holder", realizedPnlUsd: 0, unrealizedPnlUsd: 8, totalPnlUsd: 8, totalPnlPct: 80 }),
+      stats({ entityId: "bag", realizedPnlUsd: 9, unrealizedPnlUsd: -20, totalPnlUsd: -11, totalPnlPct: -110 }),
+    ]);
+    const rows = (await leaderboard(db, { kind: "agent", limit: 500 })).filter((r) => ["realized-only", "holder", "bag"].includes(r.entityId));
+    expect(rows.map((r) => r.entityId)).toEqual(["holder", "realized-only", "bag"]);
+    const holder = rows[0];
+    expect(holder?.realizedPnlUsd).toBe(0);
+    expect(holder?.unrealizedPnlUsd).toBe(8);
+    expect(holder?.totalPnlPct).toBe(80);
+  });
+});
+
 describe("markStatsVerified", () => {
   test("sets only the verification on an existing row", async () => {
     await upsertStats(db, [stats({ entityId: "a", realizedPnlUsd: 3, trades: 4, selfFunded: true })]);

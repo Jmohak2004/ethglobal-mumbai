@@ -50,6 +50,43 @@ describe("recomputeStats", () => {
     expect(row?.verified).toBeNull();
   });
 
+  test("marks open lots to the live price: realized stays realized, total adds unrealized, one lookup per asset", async () => {
+    const db = await memoryDb();
+    dbs.push(db);
+    const holders = [await seedAgent(db, { name: "[test] holder a" }), await seedAgent(db, { name: "[test] holder b" })];
+    for (const [i, agent] of holders.entries()) {
+      await upsertOrder(db, {
+        id: `hold-${i}`, agentId: agent.id, funderAddress: agent.tradingWallet, side: "buy", asset: "WETH", orderType: "market",
+        notionalUsd: 2000, status: "filled", createdAt: NOW - 3_600_000, updatedAt: NOW - 3_600_000,
+      });
+      await insertFills(db, [
+        { id: `hold-${i}:f`, orderId: `hold-${i}`, price: 2000, qty: 1, notionalUsd: 2000, feeUsd: 0, integratorFeeUsd: 0, txId: `0x${i}`, ts: NOW - 3_600_000 },
+      ]);
+    }
+    const calls: string[] = [];
+    const market = { getPrice: async (asset: string) => (calls.push(asset), 2500) };
+    await recomputeStats({ db, clock: fixedClock(), market });
+    expect(calls).toEqual(["WETH"]);
+
+    const [row] = await leaderboard(db, { kind: "agent", limit: 1 });
+    expect(row?.realizedPnlUsd).toBe(0);
+    expect(row?.unrealizedPnlUsd).toBeCloseTo(500, 9);
+    expect(row?.totalPnlUsd).toBeCloseTo(500, 9);
+    // Same $5 capital base as the realized percentage.
+    expect(row?.totalPnlPct).toBeCloseTo((500 / 5) * 100, 6);
+    expect(row?.realizedPnlPct).toBe(0);
+  });
+
+  test("a failed price lookup leaves the lot unmarked and still writes every row", async () => {
+    const { db, agent } = await tradedAgent();
+    const market = { getPrice: async (): Promise<number> => { throw new Error("down"); } };
+    expect(await recomputeStats({ db, clock: fixedClock(), market })).toBe(1);
+    const [row] = (await leaderboard(db, { kind: "agent" })).filter((r) => r.entityId === agent.id);
+    // The round trip leaves nothing open, so realized is the whole total either way.
+    expect(row?.totalPnlUsd).toBeCloseTo(200, 9);
+    expect(row?.unrealizedPnlUsd).toBe(0);
+  });
+
   test("keeps an existing verification when stats are recomputed", async () => {
     const { db, agent } = await tradedAgent();
     const clock = fixedClock();

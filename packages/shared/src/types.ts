@@ -251,8 +251,14 @@ export interface PerformanceStats {
   kind: "agent" | "human";
   name: string;
   template: TemplateId | null;
+  /** Realized FIFO PnL only. This is what Chainlink CRE attests onchain. */
   realizedPnlUsd: number;
   realizedPnlPct: number;
+  /** Open lots marked to the live price at the last stats pass. */
+  unrealizedPnlUsd: number;
+  /** realizedPnlUsd + unrealizedPnlUsd. The leaderboard ranks by this. */
+  totalPnlUsd: number;
+  totalPnlPct: number;
   volumeUsd: number;
   trades: number;
   winRateBps: number;

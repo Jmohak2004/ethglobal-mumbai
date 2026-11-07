@@ -13,6 +13,12 @@ export interface StatsInput {
   mode: ExecutionMode;
   realizedPnlUsd: number;
   realizedPnlPct: number;
+  /** Open lots marked to the live price. Default 0. */
+  unrealizedPnlUsd?: number;
+  /** Realized + unrealized, the number the leaderboard ranks by. Defaults to realizedPnlUsd + unrealizedPnlUsd. */
+  totalPnlUsd?: number;
+  /** Defaults to realizedPnlPct. */
+  totalPnlPct?: number;
   volumeUsd: number;
   trades: number;
   winRateBps: number;
@@ -46,6 +52,9 @@ export async function upsertStats(db: Db, rows: StatsInput[]): Promise<void> {
         mode: r.mode,
         realizedPnlUsd: r.realizedPnlUsd,
         pnlPct: r.realizedPnlPct,
+        unrealizedPnlUsd: r.unrealizedPnlUsd ?? 0,
+        totalPnlUsd: r.totalPnlUsd ?? r.realizedPnlUsd + (r.unrealizedPnlUsd ?? 0),
+        totalPnlPct: r.totalPnlPct ?? r.realizedPnlPct,
         volumeUsd: r.volumeUsd,
         trades: r.trades,
         winRateBps: r.winRateBps,
@@ -102,7 +111,7 @@ export interface LeaderboardQuery {
 }
 
 /**
- * Leaderboard rows (stats only, no trades or configs), sorted by realized PnL USD descending.
+ * Leaderboard rows (stats only, no trades or configs), sorted by total PnL USD (realized + unrealized) descending.
  * forkCount is computed live from the forks table.
  */
 export async function leaderboard(db: Db, query: LeaderboardQuery = {}): Promise<PerformanceStats[]> {
@@ -117,7 +126,7 @@ export async function leaderboard(db: Db, query: LeaderboardQuery = {}): Promise
     .select({ stat: agentStats, forkCount })
     .from(agentStats)
     .where(conditions.length > 0 ? and(...conditions) : undefined)
-    .orderBy(desc(agentStats.realizedPnlUsd), asc(agentStats.entityId))
+    .orderBy(desc(agentStats.totalPnlUsd), desc(agentStats.realizedPnlUsd), asc(agentStats.entityId))
     .limit(clampLimit(query.limit, 50, 500));
 
   return rows.map(({ stat: s, forkCount: fc }) => ({
@@ -127,6 +136,9 @@ export async function leaderboard(db: Db, query: LeaderboardQuery = {}): Promise
     template: (s.template as TemplateId | null) ?? null,
     realizedPnlUsd: s.realizedPnlUsd,
     realizedPnlPct: s.pnlPct,
+    unrealizedPnlUsd: s.unrealizedPnlUsd,
+    totalPnlUsd: s.totalPnlUsd,
+    totalPnlPct: s.totalPnlPct,
     volumeUsd: s.volumeUsd,
     trades: s.trades,
     winRateBps: s.winRateBps,

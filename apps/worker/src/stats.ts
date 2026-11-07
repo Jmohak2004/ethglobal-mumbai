@@ -21,10 +21,11 @@ import { agentIdToBytes32, type ExecutionMode, type FlashOrderType, type OrderIn
 import type { Hex, PublicClient } from "viem";
 import { PERFORMANCE_REGISTRY_ABI } from "./abi.ts";
 import type { CursorStore } from "./economics/relayer.ts";
-import type { Clock } from "./deps.ts";
+import type { Clock, MarketData } from "./deps.ts";
 import type { Logger } from "./logger.ts";
 import { silentLogger } from "./logger.ts";
 import { tradesFrom } from "./execution.ts";
+import { createMarkSource } from "./marks.ts";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 export const DEFAULT_LOG_CHUNK_BLOCKS = 2000;
@@ -63,9 +64,17 @@ const round = (n: number) => Math.round(n);
 /**
  * Recomputes every agent's stats from fills and forecasts. Returns the number of rows written.
  * Verification and self-funded flags are not passed, so the stored values stay as they are.
+ * realizedPnlUsd stays realized only (it is what CRE attests). With `market`, open lots are marked to the live price
+ * (one lookup per asset per pass) and totalPnlUsd = realized + unrealized. Without it, unrealized is 0.
  */
-export async function recomputeStats(opts: { db: Db; clock: Clock; logger?: Logger }): Promise<number> {
+export async function recomputeStats(opts: {
+  db: Db;
+  clock: Clock;
+  logger?: Logger;
+  market?: Pick<MarketData, "getPrice">;
+}): Promise<number> {
   const { db } = opts;
+  const markSource = createMarkSource(opts.market, opts.logger);
   const now = opts.clock.now();
   const agents = await db.query.agents.findMany();
   const rows: StatsInput[] = [];
@@ -76,7 +85,11 @@ export async function recomputeStats(opts: { db: Db; clock: Clock; logger?: Logg
     const fillRows =
       orderIds.length > 0 ? await db.query.fills.findMany({ where: (f, { inArray }) => inArray(f.orderId, orderIds) }) : [];
     const capital = a.config.limits.maxAllocationUsd;
-    const fifo = computeFifoPnl(tradesFrom(orders, fillRows), { startingCapitalUsd: capital });
+    const trades = tradesFrom(orders, fillRows);
+    const unmarked = computeFifoPnl(trades, { startingCapitalUsd: capital });
+    const marks = await markSource.marksFor(Object.keys(unmarked.openLots));
+    const fifo = computeFifoPnl(trades, { startingCapitalUsd: capital, marks });
+    const totalPnlUsd = fifo.realizedPnlUsd + fifo.unrealizedPnlUsd;
 
     const fc = await db.query.forecasts.findMany({ where: (f, { eq }) => eq(f.agentId, a.id) });
     const resolved = fc.filter((f) => f.hit !== null);
@@ -91,6 +104,9 @@ export async function recomputeStats(opts: { db: Db; clock: Clock; logger?: Logg
       mode: a.mode as ExecutionMode,
       realizedPnlUsd: fifo.realizedPnlUsd,
       realizedPnlPct: capital > 0 ? (fifo.realizedPnlUsd / capital) * 100 : 0,
+      unrealizedPnlUsd: fifo.unrealizedPnlUsd,
+      totalPnlUsd,
+      totalPnlPct: capital > 0 ? (totalPnlUsd / capital) * 100 : 0,
       volumeUsd: fifo.volumeUsd,
       trades: fifo.trades,
       winRateBps: closing > 0 ? round((fifo.wins / closing) * 10_000) : 0,

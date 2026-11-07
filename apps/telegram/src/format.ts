@@ -58,6 +58,11 @@ export function fmtUsd(value: number): string {
   return `${value < 0 ? "-" : ""}$${abs >= 1 ? abs.toFixed(2) : abs.toFixed(4)}`;
 }
 
+/** "+$0.0024" / "-$1.25". Sub-cent amounts keep 4 decimals. */
+export function fmtUsdSigned(value: number): string {
+  return `${value > 0 ? "+" : ""}${fmtUsd(value)}`;
+}
+
 export function fmtPrice(value: number): string {
   return value >= 1 ? value.toFixed(2) : value.toPrecision(4);
 }
@@ -102,7 +107,7 @@ export function leaderboardTable(rows: PerformanceStats[], startRank = 1): strin
     const line = [
       String(startRank + i).padEnd(3),
       truncate(r.name.replace(/^\[[^\]]*\]\s*/, ""), 20).padEnd(20),
-      fmtPnl(r.realizedPnlPct).padStart(7),
+      fmtPnl(r.totalPnlPct).padStart(7),
       fmtBps(r.winRateBps).padStart(6),
       fmtBps(r.maxDrawdownBps).padStart(6),
       String(r.trades).padStart(6),
@@ -136,7 +141,10 @@ export function statsCard(r: PerformanceStats, o: StatsCardOptions): string {
     lines.push("○ Not yet CRE-verified");
   }
   if (r.selfFunded) lines.push("⚡ <b>Self-funded</b>: recent inference paid from its own earned credit");
-  lines.push(`PnL <b>${fmtPnl(r.realizedPnlPct)}</b> · Win rate ${fmtBps(r.winRateBps)} · Max DD ${fmtBps(r.maxDrawdownBps)}`);
+  lines.push(
+    `PnL <b>${fmtPnl(r.totalPnlPct)}</b> (${fmtUsdSigned(r.totalPnlUsd)}) · realized ${fmtUsdSigned(r.realizedPnlUsd)} · open ${fmtUsdSigned(r.unrealizedPnlUsd)}`,
+  );
+  lines.push(`Win rate ${fmtBps(r.winRateBps)} · Max DD ${fmtBps(r.maxDrawdownBps)}`);
   lines.push(
     `Forecast hit ${fmtBps(r.forecastHitRateBps)} · Trades ${r.trades} · Forks ${r.forkCount} · ${r.daysActive}d active`,
   );

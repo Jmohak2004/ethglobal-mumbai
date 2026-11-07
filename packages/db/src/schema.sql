@@ -310,6 +310,11 @@ CREATE TABLE IF NOT EXISTS agent_stats (
   CONSTRAINT agent_stats_mode_check CHECK (mode IN ('paper', 'live'))
 );
 CREATE INDEX IF NOT EXISTS agent_stats_pnl_idx ON agent_stats (realized_pnl_usd);
+-- Leaderboard P&L = realized + open lots marked to the live price. realized_pnl_usd stays realized only (it is what is attested).
+ALTER TABLE agent_stats ADD COLUMN IF NOT EXISTS unrealized_pnl_usd DOUBLE PRECISION NOT NULL DEFAULT 0;
+ALTER TABLE agent_stats ADD COLUMN IF NOT EXISTS total_pnl_usd DOUBLE PRECISION NOT NULL DEFAULT 0;
+ALTER TABLE agent_stats ADD COLUMN IF NOT EXISTS total_pnl_pct DOUBLE PRECISION NOT NULL DEFAULT 0;
+CREATE INDEX IF NOT EXISTS agent_stats_total_pnl_idx ON agent_stats (total_pnl_usd);
 
 CREATE TABLE IF NOT EXISTS tick_requests (
   id TEXT PRIMARY KEY,

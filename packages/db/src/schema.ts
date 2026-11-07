@@ -582,6 +582,9 @@ export const agentStats = pgTable(
     mode: text("mode").notNull(),
     realizedPnlUsd: doublePrecision("realized_pnl_usd").notNull().default(0),
     pnlPct: doublePrecision("pnl_pct").notNull().default(0),
+    unrealizedPnlUsd: doublePrecision("unrealized_pnl_usd").notNull().default(0),
+    totalPnlUsd: doublePrecision("total_pnl_usd").notNull().default(0),
+    totalPnlPct: doublePrecision("total_pnl_pct").notNull().default(0),
     volumeUsd: doublePrecision("volume_usd").notNull().default(0),
     trades: integer("trades").notNull().default(0),
     winRateBps: integer("win_rate_bps").notNull().default(0),
@@ -595,6 +598,7 @@ export const agentStats = pgTable(
   },
   (t) => [
     index("agent_stats_pnl_idx").on(t.realizedPnlUsd),
+    index("agent_stats_total_pnl_idx").on(t.totalPnlUsd),
     check("agent_stats_kind_check", sql`${t.kind} in ('agent', 'human')`),
     check("agent_stats_mode_check", sql`${t.mode} in ('paper', 'live')`),
   ],

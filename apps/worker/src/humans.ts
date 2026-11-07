@@ -5,8 +5,9 @@
 
 import { insertFills, listHumansOptedIn, upsertOrder, upsertStats, type Db, type StatsInput, type UserRecord } from "@arena/db";
 import { computeFifoPnl, OPEN_ORDER_STATUSES, type FlashClient } from "@arena/flash";
-import type { Clock } from "./deps.ts";
+import type { Clock, MarketData } from "./deps.ts";
 import { tradesFrom } from "./execution.ts";
+import { createMarkSource } from "./marks.ts";
 import { silentLogger, type Logger } from "./logger.ts";
 import { fillRecordsFromDetail } from "./stats.ts";
 
@@ -17,6 +18,8 @@ export interface HumansOptions {
   flash: Pick<FlashClient, "listAllOrders" | "getOrder">;
   clock: Clock;
   logger?: Logger;
+  /** Live prices for unrealized PnL. Without it, unrealized is 0. */
+  market?: Pick<MarketData, "getPrice">;
 }
 
 export interface HumansSyncResult {
@@ -55,7 +58,7 @@ export async function syncHumans(opts: HumansOptions): Promise<HumansSyncResult>
       logger.warn("humans: flash sync failed for user; will retry", { user: user.address, error: err });
     }
   }
-  result.statsRows = await recomputeHumanStats({ db: opts.db, clock: opts.clock, logger });
+  result.statsRows = await recomputeHumanStats({ db: opts.db, clock: opts.clock, logger, market: opts.market });
   return result;
 }
 
@@ -111,9 +114,17 @@ async function syncFunderOrders(opts: HumansOptions, funder: string): Promise<{ 
  * of rows written. Paper fills are included and mark the row "paper" when all of them are simulated. Realized PnL is
  * FIFO and net of fees. Win rate and drawdown follow computeFifoPnl. There is no
  * capital base for a human, so the PnL percentage is taken over total buy notional, and the forecast hit rate is 0.
+ * With `market`, open lots are marked to the live price (one lookup per asset per pass): realizedPnlUsd stays realized
+ * only, and totalPnlUsd = realized + unrealized, as a percentage of the same buy notional.
  */
-export async function recomputeHumanStats(opts: { db: Db; clock: Clock; logger?: Logger }): Promise<number> {
+export async function recomputeHumanStats(opts: {
+  db: Db;
+  clock: Clock;
+  logger?: Logger;
+  market?: Pick<MarketData, "getPrice">;
+}): Promise<number> {
   const now = opts.clock.now();
+  const markSource = createMarkSource(opts.market, opts.logger);
   const users = await listHumansOptedIn(opts.db);
   const rows: StatsInput[] = [];
 
@@ -126,7 +137,9 @@ export async function recomputeHumanStats(opts: { db: Db; clock: Clock; logger?:
     const fillRows =
       ids.length > 0 ? await opts.db.query.fills.findMany({ where: (f, { inArray }) => inArray(f.orderId, ids) }) : [];
     const trades = tradesFrom(orders, fillRows);
-    const fifo = computeFifoPnl(trades);
+    const marks = await markSource.marksFor(Object.keys(computeFifoPnl(trades).openLots));
+    const fifo = computeFifoPnl(trades, { marks });
+    const totalPnlUsd = fifo.realizedPnlUsd + fifo.unrealizedPnlUsd;
     const boughtUsd = trades.filter((t) => t.side === "buy").reduce((sum, t) => sum + t.notionalUsd, 0);
     const closing = fifo.wins + fifo.losses;
     // Paper when there is at least one fill and every fill is simulated. A mix with live fills is live.
@@ -141,6 +154,9 @@ export async function recomputeHumanStats(opts: { db: Db; clock: Clock; logger?:
       template: null,
       realizedPnlUsd: fifo.realizedPnlUsd,
       realizedPnlPct: boughtUsd > 0 ? (fifo.realizedPnlUsd / boughtUsd) * 100 : 0,
+      unrealizedPnlUsd: fifo.unrealizedPnlUsd,
+      totalPnlUsd,
+      totalPnlPct: boughtUsd > 0 ? (totalPnlUsd / boughtUsd) * 100 : 0,
       volumeUsd: fifo.volumeUsd,
       trades: fifo.trades,
       winRateBps: closing > 0 ? Math.round((fifo.wins / closing) * 10_000) : 0,

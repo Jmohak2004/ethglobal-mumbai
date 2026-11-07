@@ -28,7 +28,7 @@ import { reflectAgent } from "./reflection.ts";
 import { runRelayerOnce } from "./economics/relayer.ts";
 import { seedDemoAgents } from "./seed.ts";
 import { provisionAgent, provisionPass } from "./provisioner.ts";
-import { syncHumans } from "./humans.ts";
+import { recomputeHumanStats, syncHumans } from "./humans.ts";
 import { INSIGHT_CYCLE_MS } from "./insights/producer.ts";
 import { createJournalRunner, journalChainFromEnv, JOURNAL_BATCH_SIZE, JOURNAL_MAX_BATCHES, runJournalPass } from "./journal.ts";
 import { createLogger } from "./logger.ts";
@@ -54,6 +54,7 @@ const USAGE = `usage: bun src/index.ts <command>
   tick <agentId>      run one decision tick and print the episode JSON
   insights <agentId>  run one insight cycle for one agent and print the digest
   provision <agentId> run every provisioning step for one agent now and print the result
+  stats               recompute agent and human stats once (marking open lots to live prices) and print the row counts
   journal             journal every pending paper fill to TradeJournal and print the totals
   seed-demo           create two paper demo agents when the database is empty`;
 
@@ -203,7 +204,7 @@ async function cmdRun(env: WorkerEnv): Promise<void> {
   };
 
   const attest = async () => {
-    await recomputeStats({ db, clock, logger: log });
+    await recomputeStats({ db, clock, logger: log, market });
     if (rt.perf) {
       await syncAttestations({
         db,
@@ -242,7 +243,7 @@ async function cmdRun(env: WorkerEnv): Promise<void> {
     if (!rt.flash || humansRunning) return;
     humansRunning = true;
     try {
-      const result = await syncHumans({ db, flash: rt.flash, clock, logger: log });
+      const result = await syncHumans({ db, flash: rt.flash, clock, logger: log, market });
       if (result.users > 0) log.info("humans board synced", { ...result });
     } finally {
       humansRunning = false;
@@ -427,6 +428,21 @@ async function cmdJournal(env: WorkerEnv): Promise<number> {
   }
 }
 
+/** One stats pass: realized + unrealized (open lots at the live price) for agents and opted-in humans. No Flash calls, no attestation. */
+async function cmdStats(env: WorkerEnv): Promise<number> {
+  const rt = createRuntime(env);
+  try {
+    await migrate(rt.db);
+    const market = rt.deps.market;
+    const agents = await recomputeStats({ db: rt.db, clock: rt.clock, logger: rt.logger, market });
+    const humans = await recomputeHumanStats({ db: rt.db, clock: rt.clock, logger: rt.logger, market });
+    console.log(JSON.stringify({ agents, humans }));
+    return 0;
+  } finally {
+    await rt.close();
+  }
+}
+
 async function cmdSeed(env: WorkerEnv): Promise<number> {
   const rt = createRuntime(env);
   await migrate(rt.db);
@@ -458,6 +474,8 @@ async function main(): Promise<number> {
       return cmdProvision(env, args[0]);
     case "journal":
       return cmdJournal(env);
+    case "stats":
+      return cmdStats(env);
     case "seed-demo":
       return cmdSeed(env);
     default:

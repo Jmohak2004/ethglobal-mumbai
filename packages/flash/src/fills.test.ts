@@ -143,4 +143,40 @@ describe("computeFifoPnl", () => {
     expect(r.realizedPnlUsd).toBeCloseTo(1000, 6);
     expect(r.openPositions.map((p) => p.asset)).toEqual(["WETH"]);
   });
+  it("marks open lots to the live price: unrealized = qty * mark - cost, fees included in cost", () => {
+    const r = computeFifoPnl(seq.slice(0, 3), { marks: { WETH: 3500 } });
+    expect(r.openLots.WETH?.qty).toBeCloseTo(0.5, 9);
+    expect(r.openLots.WETH?.costUsd).toBeCloseTo(0.5 * 3303.3, 6);
+    expect(r.unrealizedPnlUsd).toBeCloseTo(0.5 * 3500 - 0.5 * 3303.3, 6);
+    expect(r.unmarkedAssets).toEqual([]);
+    // Realized is unchanged by marks.
+    expect(r.realizedPnlUsd).toBeCloseTo(computeFifoPnl(seq.slice(0, 3)).realizedPnlUsd, 9);
+  });
+
+  it("assets without a usable mark contribute 0 and are listed as unmarked", () => {
+    const trades = [
+      t({ asset: "WETH", side: "buy", qty: 1, notionalUsd: 3000, ts: 1 }),
+      t({ asset: "cbBTC", side: "buy", qty: 0.1, notionalUsd: 10000, ts: 2 }),
+      t({ asset: "AERO", side: "buy", qty: 10, notionalUsd: 10, ts: 3 }),
+    ];
+    const r = computeFifoPnl(trades, { marks: { WETH: 3300, AERO: Number.NaN } });
+    expect(r.unrealizedPnlUsd).toBeCloseTo(300, 6);
+    expect(r.unmarkedAssets.sort()).toEqual(["AERO", "cbBTC"]);
+  });
+
+  it("without marks, unrealized is 0 and every open asset is unmarked; closed assets are not", () => {
+    const r = computeFifoPnl([
+      t({ asset: "WETH", side: "buy", qty: 1, notionalUsd: 3000, ts: 1 }),
+      t({ asset: "cbBTC", side: "buy", qty: 0.1, notionalUsd: 10000, ts: 2 }),
+      t({ asset: "cbBTC", side: "sell", qty: 0.1, notionalUsd: 11000, ts: 3 }),
+    ]);
+    expect(r.unrealizedPnlUsd).toBe(0);
+    expect(r.unmarkedAssets).toEqual(["WETH"]);
+    expect(Object.keys(r.openLots)).toEqual(["WETH"]);
+  });
+
+  it("a mark below cost gives negative unrealized PnL", () => {
+    const r = computeFifoPnl([t({ side: "buy", qty: 2, notionalUsd: 6000, feeUsd: 6, ts: 1 })], { marks: { WETH: 2500 } });
+    expect(r.unrealizedPnlUsd).toBeCloseTo(5000 - 6006, 6);
+  });
 });

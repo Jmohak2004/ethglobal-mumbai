@@ -62,6 +62,15 @@ export interface FifoPnlResult {
    */
   maxDrawdownPct: number;
   openPositions: OpenPosition[];
+  /** Remaining lots per asset: total quantity and cost basis (fees included). Assets with nothing open are absent. */
+  openLots: Record<string, { qty: number; costUsd: number }>;
+  /**
+   * Open lots marked to `opts.marks`: sum of qty * mark - cost. Net of buy fees, before any exit fee. Assets with no
+   * usable mark (missing, non-finite or <= 0) contribute 0 and are listed in unmarkedAssets.
+   */
+  unrealizedPnlUsd: number;
+  /** Assets with open lots and no usable mark. Their unrealized PnL is not in unrealizedPnlUsd. */
+  unmarkedAssets: string[];
   /** Sell quantity that exceeded inventory. It is excluded from PnL, not invented as profit. */
   unmatchedSells: { asset: string; qty: number }[];
 }
@@ -75,7 +84,10 @@ interface Lot {
  * FIFO realized PnL per asset. Buys open lots at (notional + fee) / qty. Sells close the oldest lots first,
  * at (notional - fee) / qty per unit. Trades are processed in ascending ts; ties keep input order.
  */
-export function computeFifoPnl(trades: Trade[], opts: { startingCapitalUsd?: number } = {}): FifoPnlResult {
+export function computeFifoPnl(
+  trades: Trade[],
+  opts: { startingCapitalUsd?: number; /** Asset to USD price, for unrealized PnL. */ marks?: Record<string, number> } = {},
+): FifoPnlResult {
   const ordered = trades
     .map((t, i) => ({ t, i }))
     .sort((a, b) => a.t.ts - b.t.ts || a.i - b.i)
@@ -142,11 +154,18 @@ export function computeFifoPnl(trades: Trade[], opts: { startingCapitalUsd?: num
   const maxDrawdownPct = base > 0 ? (maxDrawdownUsd / base) * 100 : 0;
 
   const openPositions: OpenPosition[] = [];
+  const openLots: Record<string, { qty: number; costUsd: number }> = {};
+  let unrealized = 0;
+  const unmarkedAssets: string[] = [];
   for (const [asset, ls] of lots) {
     const qty = ls.reduce((s, l) => s + l.qty, 0);
     if (qty <= EPS) continue;
     const costUsd = ls.reduce((s, l) => s + l.qty * l.unitCostUsd, 0);
     openPositions.push({ asset, qty, costUsd, avgCostUsd: costUsd / qty });
+    openLots[asset] = { qty, costUsd };
+    const mark = opts.marks?.[asset];
+    if (mark !== undefined && Number.isFinite(mark) && mark > 0) unrealized += qty * mark - costUsd;
+    else unmarkedAssets.push(asset);
   }
 
   return {
@@ -157,6 +176,9 @@ export function computeFifoPnl(trades: Trade[], opts: { startingCapitalUsd?: num
     losses,
     maxDrawdownPct,
     openPositions,
+    openLots,
+    unrealizedPnlUsd: unrealized,
+    unmarkedAssets,
     unmatchedSells: [...unmatched.entries()].map(([asset, qty]) => ({ asset, qty })),
   };
 }
