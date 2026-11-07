@@ -1,9 +1,12 @@
-// Live candles for /trade from Coinbase Exchange public market data. Server-only.
-// Coinbase rows are [time, low, high, open, close, volume], newest first. Output is ascending Candle[] with
-// unix-ms times. A 30 s in-memory cache per asset and granularity keeps us well under the public rate limit.
+// Live candles and 24h stats for /trade from Coinbase Exchange public market data. Server-only.
+// Coinbase candle rows are [time, low, high, open, close, volume], newest first. Output is ascending Candle[] with
+// unix-ms times. Caches are per key and short: candles 10-30 s by granularity, stats 15 s, so the public rate limit
+// holds even with every tab open.
 import { COINBASE_PRODUCTS, type Candle, type Indicators } from "@arena/shared";
 
+import { env } from "@/lib/server/env";
 import { ApiError } from "@/lib/server/errors";
+import type { MarketStats, MarketsResponse } from "@/lib/live/types";
 import type { MarketResponse } from "@/lib/types";
 
 const COINBASE_EXCHANGE = "https://api.exchange.coinbase.com";
@@ -11,20 +14,36 @@ const COINBASE_EXCHANGE = "https://api.exchange.coinbase.com";
 export const GRANULARITIES = [60, 300, 900, 3600, 21600, 86400] as const;
 export const DEFAULT_GRANULARITY = 300;
 
-const CACHE_TTL_MS = 30_000;
+const STATS_TTL_MS = 15_000;
+const STATS_CONCURRENCY = 4;
 const FETCH_TIMEOUT_MS = 8_000;
 const DAY_MS = 86_400_000;
+const STALE_CANDLE_MS = 7 * DAY_MS;
 
-interface CacheEntry {
-  at: number;
-  value: MarketResponse;
+/** Candle cache lifetime. Short for 1m so history stays close to the live tape. */
+export function candleTtlMs(granularity: number): number {
+  if (granularity <= 60) return 10_000;
+  if (granularity <= 300) return 15_000;
+  return 30_000;
 }
-const cache = new Map<string, CacheEntry>();
-const inflight = new Map<string, Promise<MarketResponse>>();
+
+interface CacheEntry<T> {
+  at: number;
+  value: T;
+}
+const candleCache = new Map<string, CacheEntry<MarketResponse>>();
+const candleInflight = new Map<string, Promise<MarketResponse>>();
+const statsCache = new Map<string, CacheEntry<MarketStats>>();
+const statsInflight = new Map<string, Promise<MarketStats>>();
 
 /** True for tickers with a Coinbase product (every tradable ticker in @arena/shared). */
 export function isTradeAsset(asset: string): boolean {
   return Object.hasOwn(COINBASE_PRODUCTS, asset);
+}
+
+/** Platform allowlist (ALLOWED_TOKENS) limited to tickers that have a Coinbase product, in env order. */
+export function tradeAssets(): string[] {
+  return env().ALLOWED_TOKENS.filter(isTradeAsset);
 }
 
 export function isGranularity(n: number): n is (typeof GRANULARITIES)[number] {
@@ -32,21 +51,24 @@ export function isGranularity(n: number): n is (typeof GRANULARITIES)[number] {
 }
 
 /**
- * Market snapshot for one allowlisted asset. Serves the cached value for 30 s. If Coinbase fails and an older
- * value exists, the older value is served instead of an error. Throws ApiError(502) when there is nothing to serve.
+ * Serves a cached value while it is fresh. Otherwise it loads once (concurrent callers share the request). If the
+ * load fails and an older value exists, the older value is served instead of an error.
  */
-export async function loadMarket(asset: string, granularity: number = DEFAULT_GRANULARITY): Promise<MarketResponse> {
-  const product = isTradeAsset(asset) ? COINBASE_PRODUCTS[asset] : undefined;
-  if (!product) throw new ApiError(404, "NOT_FOUND", `Unknown asset ${asset}`);
-  const key = `${asset}:${granularity}`;
-  const hit = cache.get(key);
-  if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.value;
+function cachedLoad<T>(
+  store: Map<string, CacheEntry<T>>,
+  inflight: Map<string, Promise<T>>,
+  key: string,
+  ttlMs: number,
+  load: () => Promise<T>,
+): Promise<T> {
+  const hit = store.get(key);
+  if (hit && Date.now() - hit.at < ttlMs) return Promise.resolve(hit.value);
 
   let pending = inflight.get(key);
   if (!pending) {
-    pending = fetchMarket(asset, product, granularity)
+    pending = load()
       .then((value) => {
-        cache.set(key, { at: Date.now(), value });
+        store.set(key, { at: Date.now(), value });
         return value;
       })
       .catch((err: unknown) => {
@@ -59,11 +81,59 @@ export async function loadMarket(asset: string, granularity: number = DEFAULT_GR
   return pending;
 }
 
-async function fetchMarket(asset: string, product: string, granularity: number): Promise<MarketResponse> {
-  const url = `${COINBASE_EXCHANGE}/products/${product}/candles?granularity=${granularity}`;
+/**
+ * Market snapshot for one allowlisted asset at one granularity. Throws ApiError(502) when there is nothing to serve.
+ */
+export async function loadMarket(asset: string, granularity: number = DEFAULT_GRANULARITY): Promise<MarketResponse> {
+  const product = isTradeAsset(asset) ? COINBASE_PRODUCTS[asset] : undefined;
+  if (!product) throw new ApiError(404, "NOT_FOUND", `Unknown asset ${asset}`);
+  return cachedLoad(candleCache, candleInflight, `${asset}:${granularity}`, candleTtlMs(granularity), () =>
+    fetchMarket(asset, product, granularity),
+  );
+}
+
+/** 24h stats for one allowlisted asset (Coinbase /products/{id}/stats), cached 15 s. */
+export function loadStats(asset: string): Promise<MarketStats> {
+  const product = isTradeAsset(asset) ? COINBASE_PRODUCTS[asset] : undefined;
+  if (!product) return Promise.reject(new ApiError(404, "NOT_FOUND", `Unknown asset ${asset}`));
+  return cachedLoad(statsCache, statsInflight, asset, STATS_TTL_MS, () => fetchStats(asset, product));
+}
+
+/**
+ * Stats for every asset, fetched with a concurrency limit. Assets that fail are left out. Throws ApiError(502) only
+ * when none succeed.
+ */
+export async function loadStatsForAssets(assets: readonly string[]): Promise<MarketsResponse> {
+  const settled = await mapLimit(assets, STATS_CONCURRENCY, (asset) =>
+    loadStats(asset).then(
+      (v) => v,
+      () => null,
+    ),
+  );
+  const markets = settled.filter((m): m is MarketStats => m !== null);
+  if (markets.length === 0) throw new ApiError(502, "UPSTREAM", "Market data is unavailable right now");
+  const unavailable = assets.filter((_, i) => settled[i] === null);
+  return { ts: Date.now(), markets, unavailable };
+}
+
+async function mapLimit<T, R>(items: readonly T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const out = new Array<R>(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next++;
+      out[i] = await fn(items[i] as T);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return out;
+}
+
+/** GET a public Coinbase Exchange path and return the parsed JSON. Maps failures to ApiError(502). */
+async function coinbaseGet(path: string): Promise<unknown> {
   let res: Response;
   try {
-    res = await fetch(url, {
+    res = await fetch(`${COINBASE_EXCHANGE}${path}`, {
       headers: { accept: "application/json", "user-agent": "arena-web" },
       cache: "no-store",
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
@@ -72,10 +142,15 @@ async function fetchMarket(asset: string, product: string, granularity: number):
     throw new ApiError(502, "UPSTREAM", "Market data is unreachable right now");
   }
   if (!res.ok) throw new ApiError(502, "UPSTREAM", `Market data returned ${res.status}`);
+  return res.json().catch(() => null);
+}
 
-  const candles = parseCandles(await res.json().catch(() => null));
+async function fetchMarket(asset: string, product: string, granularity: number): Promise<MarketResponse> {
+  const candles = parseCandles(await coinbaseGet(`/products/${product}/candles?granularity=${granularity}`));
   const last = candles.at(-1);
   if (!last) throw new ApiError(502, "UPSTREAM", "Market data returned no candles");
+  // Coinbase keeps history for delisted products. A last candle this old means there is no live market.
+  if (Date.now() - last.t > STALE_CANDLE_MS) throw new ApiError(502, "UPSTREAM", `No recent candles for ${product}`);
 
   // 24h stats from the candles themselves: window is the last 24 h, reference price is the bar open 24 h back.
   const windowStart = last.t - DAY_MS;
@@ -99,6 +174,29 @@ async function fetchMarket(asset: string, product: string, granularity: number):
   };
 }
 
+async function fetchStats(asset: string, product: string): Promise<MarketStats> {
+  const body = (await coinbaseGet(`/products/${product}/stats`)) as Record<string, unknown> | null;
+  const last = num(body?.last);
+  const open = num(body?.open);
+  const high = num(body?.high);
+  const low = num(body?.low);
+  const volume = num(body?.volume);
+  if (last === null || open === null || high === null || low === null || volume === null || last <= 0) {
+    throw new ApiError(502, "UPSTREAM", `Market stats for ${product} were malformed`);
+  }
+  return {
+    asset,
+    product,
+    priceUsd: last,
+    open24h: open,
+    high24h: high,
+    low24h: low,
+    volume24h: round(volume, 4),
+    change24hPct: round(open > 0 ? ((last - open) / open) * 100 : 0, 2),
+    ts: Date.now(),
+  };
+}
+
 /** Coinbase rows to ascending candles. Malformed rows are dropped; duplicate times keep the first row. */
 export function parseCandles(rows: unknown): Candle[] {
   if (!Array.isArray(rows)) return [];
@@ -113,6 +211,11 @@ export function parseCandles(rows: unknown): Candle[] {
     }
   }
   return [...byTime.values()].sort((a, b) => a.t - b.t);
+}
+
+function num(v: unknown): number | null {
+  const n = typeof v === "string" ? Number(v) : v;
+  return typeof n === "number" && Number.isFinite(n) ? n : null;
 }
 
 // ---- Indicators (same formulas the AI chart read uses as its baseline) ----
