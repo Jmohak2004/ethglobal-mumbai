@@ -96,6 +96,9 @@ export function ticketToIntent(t: TicketInput): OrderIntent {
       return { ...base, orderType: "limit", limitPrice: num(t.limitPrice, "limitPrice"), ...(attachedBracket ? { attachedBracket } : {}) };
     case "bracket":
       if (!attachedBracket) throw new ApiError(422, "VALIDATION", "Bracket orders need take-profit and stop-loss prices");
+      // Sell: Flash's standalone bracket closes an existing position at TP or SL (no limit price).
+      // Buy: a limit entry with the TP/SL attached.
+      if (t.side === "sell") return { ...base, orderType: "bracket", attachedBracket };
       return { ...base, orderType: "limit", limitPrice: num(t.limitPrice, "limitPrice"), attachedBracket };
     case "twap": {
       const durationMin = num(t.twap?.durationMin, "TWAP duration");

@@ -89,7 +89,7 @@ export function OrderTicket({
     asset,
     orderType: type,
     sizeUsd: size,
-    ...(type === "limit" || type === "bracket" ? { limitPrice: limitPx } : {}),
+    ...(type === "limit" || (type === "bracket" && isBuy) ? { limitPrice: limitPx } : {}),
     ...(type === "stop" ? { triggerPrice: triggerPx } : {}),
     ...(type === "trailing" ? { trailPct } : {}),
     ...(type === "twap" ? { twap: { durationMin: twapMin, buckets: twapBuckets } } : {}),
@@ -223,7 +223,7 @@ export function OrderTicket({
         {type === "market" ? (
           <div className="text-[11.5px] text-muted">Fills at the executable Flash quote. Slippage shown in the quote.</div>
         ) : null}
-        {type === "limit" || type === "bracket" ? (
+        {type === "limit" || (type === "bracket" && isBuy) ? (
           <Field label="Limit price">
             <Input
               type="number"
