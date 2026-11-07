@@ -17,15 +17,14 @@ const ITEMS: { level: RiskLevel; label: string; hint: string }[] = [
 ];
 
 /**
- * Nav "Demo" menu. Renders only when the server reports demoControls (DEMO_CONTROLS=true). The server still checks the
- * flag and the session on POST /api/demo/risk. A successful change refreshes the nav risk pill at once.
+ * Demo section of the nav "more" menu. Renders only when the server reports demoControls (DEMO_CONTROLS=true). The
+ * server still checks the flag and the session on POST /api/demo/risk. A successful change refreshes the risk chip at once.
  */
 export function DemoMenu() {
   const platform = usePlatform();
   const session = useSession({ prompt: false });
   const toast = useToast();
   const qc = useQueryClient();
-  const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
 
   if (!platform.data?.demoControls) return null;
@@ -37,10 +36,9 @@ export function DemoMenu() {
       await qc.invalidateQueries({ queryKey: ["risk"] });
       toast({
         title: `Risk set to ${level}`,
-        description: "The nav pill updates within a few seconds.",
+        description: "The risk chip updates within a few seconds.",
         tone: level === "HALT" ? "error" : "default",
       });
-      setOpen(false);
     } catch (err) {
       toast({ title: "Demo risk not set", description: describeError(err), tone: "error" });
     } finally {
@@ -52,46 +50,35 @@ export function DemoMenu() {
     session.signIn().catch((err: unknown) => toast({ title: "Sign-in failed", description: describeError(err), tone: "error" }));
 
   return (
-    <div className="relative">
-      <button
-        type="button"
-        aria-expanded={open}
-        aria-label="Demo controls"
-        onClick={() => setOpen((o) => !o)}
-        className="h-6 rounded-md border border-warn/40 px-2 text-[11px] text-warn transition-colors hover:bg-warn/10"
-      >
-        Demo
-      </button>
-      {open ? (
-        <div className="absolute right-0 top-8 z-50 w-72 rounded-md border border-border bg-panel p-3 text-[12px] shadow-lg">
-          <div className="font-medium">Demo risk controls</div>
-          <p className="mt-1 text-[11.5px] text-muted">
-            Writes a simulated RiskOracle level to the database. Needs a signed-in session.
-          </p>
-          {session.signedAddress === null ? (
-            <div className="mt-2 flex items-center justify-between gap-2 rounded border border-dashed border-border px-2 py-2 text-[11.5px] text-muted">
-              <span>Sign in first.</span>
-              <Button size="sm" variant="secondary" onClick={signIn}>
-                Sign in
-              </Button>
-            </div>
-          ) : null}
-          <div className="mt-2 flex flex-col gap-1.5">
-            {ITEMS.map((item) => (
-              <button
-                key={item.level}
-                type="button"
-                disabled={busy || session.signedAddress === null}
-                onClick={() => setLevel(item.level)}
-                className="flex flex-col items-start rounded-md border border-border bg-panel-2 px-2.5 py-2 text-left transition-colors hover:bg-border disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                <span className="font-medium">{item.label}</span>
-                <span className="text-[11px] text-muted">{item.hint}</span>
-              </button>
-            ))}
-          </div>
+    <div className="mt-3 flex flex-col gap-2 border-t border-border pt-3">
+      <div>
+        <div className="text-base font-medium">Demo: simulate market risk</div>
+        <p className="mt-0.5 text-xs text-muted">
+          Writes a simulated crash-light level so you can show how agents react. Needs a signed-in session.
+        </p>
+      </div>
+      {session.signedAddress === null ? (
+        <div className="flex items-center justify-between gap-2 rounded-lg border border-dashed border-border-strong px-3 py-2 text-sm text-muted">
+          <span>Sign in first.</span>
+          <Button size="sm" variant="secondary" onClick={signIn}>
+            Sign in
+          </Button>
         </div>
       ) : null}
+      <div className="flex flex-col gap-1">
+        {ITEMS.map((item) => (
+          <button
+            key={item.level}
+            type="button"
+            disabled={busy || session.signedAddress === null}
+            onClick={() => setLevel(item.level)}
+            className="flex flex-col items-start rounded-lg border border-border px-3 py-2 text-left transition-colors duration-100 hover:bg-panel-2 disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent"
+          >
+            <span className="text-base font-medium">{item.label}</span>
+            <span className="text-xs text-muted">{item.hint}</span>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

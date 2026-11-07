@@ -1,30 +1,32 @@
 import { LandingSection } from "@/components/landing/section";
+import { Card } from "@/components/ui/card";
+import { IconCheck } from "@/components/ui/icons";
 import { COMMISSION_BPS, DEMO_CAPS } from "@/lib/templates";
 
 const POINTS = [
   {
     title: "Paper mode by default",
-    body: "Agents and manual trades get real Flash quotes and simulated fills. Nothing is sent to Flash and no money moves. The order ticket says Paper · simulated.",
+    body: "Agents and manual trades get real prices and simulated fills. Nothing is sent and no money moves.",
   },
   {
-    title: "Tiny caps",
-    body: "Every agent has hard limits, and owners can set them lower, not higher. The per-trade cap is what you see in the Limits panel on Create Agent.",
+    title: "Tiny, hard limits",
+    body: "Every agent has caps on trade size, daily loss and open positions. Owners can lower them, never raise them.",
   },
   {
     title: "Take-profit and stop-loss on every buy",
-    body: "Each buy carries a take-profit and a stop-loss, priced from the mark. Paper mode monitors both in simulation.",
+    body: "Each buy is paired with an exit for gains and an exit for losses, set from the current price.",
   },
   {
-    title: "The crash light",
-    body: "NORMAL, CAUTION or HALT. On HALT an agent opens no new buys and cancels pending entries. Then, per the owner's setting, it tightens stop-losses or sells everything to USDC.",
+    title: "A crash light agents obey",
+    body: "When the market looks dangerous, agents stop opening new buys and cancel pending ones, then tighten stops or sell to USDC.",
   },
   {
     title: "Stats-only privacy",
-    body: "The leaderboard shows stats, not trades, sliders or configs. Owners and forkers see the full setup.",
+    body: "The leaderboard shows results, not trades, settings or sliders. Only owners and people who copy an agent see its setup.",
   },
   {
     title: "Commission only on new highs",
-    body: "Commission is charged only on profit above the agent's high-water mark, never on winning back old losses.",
+    body: "Agents earn commission only on profit above their previous best, never on winning back old losses.",
   },
 ];
 
@@ -36,7 +38,7 @@ export function Safety() {
     { label: "Max open positions", value: String(DEMO_CAPS.maxOpenPositions) },
     {
       label: "Commission",
-      value: `${COMMISSION_BPS.min / 100}–${COMMISSION_BPS.max / 100}%`,
+      value: `${COMMISSION_BPS.min / 100} to ${COMMISSION_BPS.max / 100}%`,
       note: `default ${COMMISSION_BPS.default / 100}%, new highs only`,
     },
   ];
@@ -46,42 +48,42 @@ export function Safety() {
       id="safety"
       eyebrow="Safety and money"
       title="Small by design, paper first"
-      lede="The limits are code the agent cannot talk its way past. The numbers on the right are the server's upper bounds."
+      lede="The limits are code that an agent cannot talk its way past."
     >
-      <div className="grid gap-6 md:grid-cols-[1.4fr_1fr]">
-        <ul className="flex flex-col divide-y divide-border rounded-md border border-border bg-panel">
-          {POINTS.map((p) => (
-            <li key={p.title} className="flex flex-col gap-1 px-4 py-3">
-              <h3 className="text-[13px] font-medium">{p.title}</h3>
-              <p className="text-[12.5px] leading-relaxed text-muted">{p.body}</p>
-            </li>
-          ))}
-        </ul>
-
-        <div className="flex flex-col gap-3">
-          <section aria-labelledby="limits-title" className="flex flex-col rounded-md border border-border bg-panel">
-            <h3
-              id="limits-title"
-              className="flex h-8 items-center border-b border-border px-3 text-[10.5px] font-medium uppercase tracking-wider text-muted"
-            >
-              Limits per agent
-            </h3>
-            <dl>
-              {caps.map((c) => (
-                <div key={c.label} className="flex items-baseline justify-between gap-3 border-b border-border px-3 py-2 last:border-b-0">
-                  <dt className="text-[12.5px]">
-                    {c.label}
-                    {c.note ? <span className="block text-[11px] text-muted">{c.note}</span> : null}
-                  </dt>
-                  <dd className="num text-[13px] font-medium">{c.value}</dd>
+      <div className="grid gap-4 lg:grid-cols-[1.5fr_1fr]">
+        <Card>
+          <ul className="grid sm:grid-cols-2">
+            {POINTS.map((p) => (
+              <li key={p.title} className="flex gap-3 border-b border-border p-5 last:border-b-0 sm:[&:nth-last-child(2)]:border-b-0 sm:odd:border-r">
+                <span aria-hidden className="mt-0.5 grid size-5 shrink-0 place-items-center rounded-full bg-long-soft text-long">
+                  <IconCheck size={12} strokeWidth={2.5} />
+                </span>
+                <div className="flex flex-col gap-1">
+                  <h3 className="text-base font-semibold">{p.title}</h3>
+                  <p className="text-sm text-muted">{p.body}</p>
                 </div>
-              ))}
-            </dl>
-          </section>
-          <p className="text-[11.5px] leading-relaxed text-muted">
-            Servers with DEMO_CONTROLS on show a Demo menu in the nav that can simulate a HALT for testing. It is off by default.
+              </li>
+            ))}
+          </ul>
+        </Card>
+
+        <Card className="self-start">
+          <h3 className="border-b border-border px-5 py-3.5 text-base font-semibold">Limits per agent</h3>
+          <dl>
+            {caps.map((c) => (
+              <div key={c.label} className="flex items-baseline justify-between gap-3 border-b border-border px-5 py-3 last:border-b-0">
+                <dt className="text-base">
+                  {c.label}
+                  {c.note ? <span className="block text-xs text-muted">{c.note}</span> : null}
+                </dt>
+                <dd className="num text-base font-medium">{c.value}</dd>
+              </div>
+            ))}
+          </dl>
+          <p className="border-t border-border bg-panel-2/60 px-5 py-3 text-xs text-muted">
+            These are the server&apos;s upper bounds in this build.
           </p>
-        </div>
+        </Card>
       </div>
     </LandingSection>
   );

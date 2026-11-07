@@ -186,19 +186,19 @@ export function OrderTicket({
       : busy ?? "Get quote";
 
   return (
-    <section className="flex min-w-0 flex-col rounded-md border border-border bg-panel" aria-label="Order ticket">
-      <header className="flex h-8 items-center justify-between border-b border-border px-3 text-[10.5px] font-medium uppercase tracking-wider text-muted">
-        <span>Order ticket</span>
+    <section className="flex min-w-0 flex-col rounded-xl border border-border bg-panel shadow-[var(--shadow-card)]" aria-label="Order ticket">
+      <header className="flex min-h-12 items-center justify-between px-4 pt-3">
+        <h2 className="text-base font-semibold tracking-[-0.012em] text-text">Order ticket</h2>
         {platform.data ? (
-          <span className={clsx("normal-case tracking-normal", live ? "text-long" : "text-warn")}>
+          <span className={clsx("rounded-full px-2.5 py-0.5 text-xs font-medium", live ? "bg-long-soft text-long" : "bg-warn-soft text-warn")}>
             {live ? "Live · Flash" : "Paper · simulated"}
           </span>
         ) : null}
       </header>
-      <div className="flex flex-col gap-3 p-3">
-        <Tabs value={type} items={TYPES} onChange={setType} className="overflow-x-auto" />
+      <div className="flex flex-col gap-4 p-4">
+        <Tabs label="Order type" value={type} items={TYPES} onChange={setType} className="overflow-x-auto" />
 
-        <div className="grid grid-cols-2 gap-1 rounded-md border border-border bg-bg p-0.5">
+        <div role="group" aria-label="Side" className="grid grid-cols-2 gap-1 rounded-lg bg-panel-2 p-0.5 ring-1 ring-inset ring-border">
           <button
             type="button"
             aria-pressed={isBuy}
@@ -207,8 +207,8 @@ export function OrderTicket({
               setQuote(null);
             }}
             className={clsx(
-              "h-7 rounded text-[12px] font-semibold transition-colors",
-              isBuy ? "bg-long text-bg" : "text-muted hover:text-text",
+              "h-8 rounded-md text-sm font-semibold transition-[background-color,color] duration-150",
+              isBuy ? "bg-long text-white" : "text-muted hover:text-text",
             )}
           >
             Buy
@@ -221,8 +221,8 @@ export function OrderTicket({
               setQuote(null);
             }}
             className={clsx(
-              "h-7 rounded text-[12px] font-semibold transition-colors",
-              !isBuy ? "bg-short text-bg" : "text-muted hover:text-text",
+              "h-8 rounded-md text-sm font-semibold transition-[background-color,color] duration-150",
+              !isBuy ? "bg-short text-white" : "text-muted hover:text-text",
             )}
           >
             Sell
@@ -249,7 +249,7 @@ export function OrderTicket({
         </Field>
 
         {type === "market" ? (
-          <div className="text-[11.5px] text-muted">Fills at the executable Flash quote. Slippage shown in the quote.</div>
+          <div className="text-sm text-muted">Fills at the executable Flash quote. Slippage shown in the quote.</div>
         ) : null}
         {type === "limit" || (type === "bracket" && isBuy) ? (
           <Field label="Limit price">
@@ -285,7 +285,7 @@ export function OrderTicket({
                 value={trailPct}
                 onChange={(e) => setTrailPct(e.target.valueAsNumber)}
               />
-              <span className="text-[11px] text-muted">%</span>
+              <span className="text-xs text-muted">%</span>
             </div>
           </Field>
         ) : null}
@@ -315,25 +315,25 @@ export function OrderTicket({
           </div>
         ) : null}
 
-        <div className="flex flex-col gap-2 rounded-md border border-border p-2.5">
+        <div className="flex flex-col gap-3 rounded-lg border border-border p-3">
           <div className="flex items-center justify-between">
-            <span className="text-[12px]">Take-profit</span>
+            <span className="text-sm font-medium">Take-profit</span>
             <Switch label="Take-profit" checked={tpOn} onChange={setTpOn} />
           </div>
           {tpOn ? (
             <Input aria-label="Take-profit price" type="number" step={0.01} value={tpPx} onChange={(e) => setTpPx(e.target.valueAsNumber)} />
           ) : null}
           <div className="flex items-center justify-between">
-            <span className="text-[12px]">Stop-loss</span>
+            <span className="text-sm font-medium">Stop-loss</span>
             <Switch label="Stop-loss" checked={slOn} onChange={setSlOn} />
           </div>
           {slOn ? (
             <Input aria-label="Stop-loss price" type="number" step={0.01} value={slPx} onChange={(e) => setSlPx(e.target.valueAsNumber)} />
           ) : null}
-          <div className="text-[11px] text-muted">Attached brackets protect entries on Market, Limit and TWAP.</div>
+          <div className="text-xs text-muted">Attached brackets protect entries on Market, Limit and TWAP.</div>
         </div>
 
-        <dl className="num grid grid-cols-2 gap-y-1 text-[11.5px]">
+        <dl className="num grid grid-cols-2 gap-y-1.5 text-sm [&_dt]:font-sans">
           <dt className="text-muted">Integrator fee ({FLASH_INTEGRATOR_FEE_BPS / 100}%)</dt>
           <dd className="text-right">{fmtUsd(notionalFee, 4)}</dd>
           <dt className="text-muted">Flash network fee</dt>
@@ -347,14 +347,15 @@ export function OrderTicket({
         {!quote ? (
           <Button
             variant={isBuy ? "long" : "short"}
-            className="h-9 w-full text-[13px]"
+            size="lg"
+            className="w-full"
             disabled={!sizeOk || busy !== null}
             onClick={getQuote}
           >
             {mainLabel}
           </Button>
         ) : null}
-        <p className="text-[11px] text-muted">
+        <p className="text-xs text-muted">
           {live
             ? "Quotes come from Definitive Flash and expire after 2 minutes. Your wallet signs each order and approval."
             : "Paper mode: quotes are estimates and fills are simulated. Nothing is sent to Flash."}
@@ -378,10 +379,10 @@ function QuotePanel({
   onDismiss: () => void;
 }) {
   return (
-    <div className="flex flex-col gap-2 rounded-md border border-border bg-bg p-2.5 text-[11.5px]">
+    <div className="flex flex-col gap-2.5 rounded-lg bg-panel-2 p-3 text-sm">
       <div className="flex items-center justify-between">
         <span className="font-medium">{quote.mode === "paper" ? "Simulated quote" : "Flash quote"}</span>
-        <button type="button" className="text-muted hover:text-text" onClick={onDismiss}>
+        <button type="button" className="rounded-md px-1 text-muted hover:text-text" onClick={onDismiss}>
           Dismiss
         </button>
       </div>

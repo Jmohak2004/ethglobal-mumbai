@@ -9,6 +9,7 @@ import { Hero, type LiveStats } from "@/components/landing/hero";
 import { HowItWorks } from "@/components/landing/how-it-works";
 import { Safety } from "@/components/landing/safety";
 import { getLeaderboard, getRisk } from "@/lib/data";
+import { getTemplate } from "@/lib/templates";
 import { softRead } from "@/lib/server/soft";
 import type { RiskDisplay } from "@/lib/types";
 
@@ -26,6 +27,13 @@ async function loadLiveStats(): Promise<LiveStats | null> {
         live: rows.filter((r) => r.mode === "live").length,
         paper: rows.filter((r) => r.mode === "paper").length,
         verifiedPct: rows.length ? (verified / rows.length) * 100 : 0,
+        top: rows.slice(0, 3).map((r) => ({
+          id: r.entityId,
+          name: r.name,
+          template: r.template ? (getTemplate(r.template)?.name ?? r.template) : "Agent",
+          pnlPct: r.realizedPnlPct,
+          verified: r.verified !== null,
+        })),
       };
     },
     null,

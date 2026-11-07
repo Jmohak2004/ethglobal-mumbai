@@ -3,10 +3,11 @@
 import type { StrategyConfig } from "@arena/shared";
 
 import { Badge } from "@/components/ui/badge";
-import { fmtBps, fmtPct, shortAddr } from "@/lib/format";
-import { DEMO_CAPS, FORK_PLATFORM_BPS, getTemplate, MODEL_TIERS, CRASH_MODES } from "@/lib/templates";
+import { IconCheck } from "@/components/ui/icons";
+import { fmtPct, shortAddr } from "@/lib/format";
+import { CRASH_MODES, DEMO_CAPS, FORK_PLATFORM_BPS, MODEL_TIERS, getTemplate } from "@/lib/templates";
 
-/** Readable spec, demo-limit warning and collapsible JSON for the config being built. */
+/** Plain-words review of the agent being built, the demo-limit note and the raw JSON for anyone who wants it. */
 export function SummaryPanel({
   name,
   config,
@@ -23,65 +24,69 @@ export function SummaryPanel({
   const tpl = getTemplate(config.template);
   const json = JSON.stringify({ name: name.trim(), config }, null, 2);
   const rows: [string, string][] = [
-    ["Template", tpl?.name ?? config.template],
-    ["Name", name.trim() || "not set"],
-    ["Owner", ownerLabel ? (ownerLabel.startsWith("0x") ? shortAddr(ownerLabel) : ownerLabel) : "not connected"],
-    ["Mode", mode],
-    ["Assets", config.assets.join(", ")],
-    ["Sliders", tpl ? tpl.sliders.map((s) => `${s.label} ${config.sliders[s.key] ?? s.default}${s.unit}`).join(" · ") : "-"],
-    ["Max trade", `$${config.limits.maxTradeUsd}`],
-    ["Max allocation", `$${config.limits.maxAllocationUsd}`],
+    ["Name", name.trim() || "Not set yet"],
+    ["Strategy", tpl?.name ?? config.template],
+    ["Owner", ownerLabel ? (ownerLabel.startsWith("0x") ? shortAddr(ownerLabel) : ownerLabel) : "No wallet connected"],
+    ["Mode", mode === "paper" ? "Paper (simulated, no real money)" : "Live (real money)"],
+    ["Markets", config.assets.join(", ")],
+    ["Settings", tpl ? tpl.sliders.map((s) => `${s.label} ${config.sliders[s.key] ?? s.default}${s.unit}`).join(", ") : "-"],
+    ["Per trade", `Up to $${config.limits.maxTradeUsd}`],
     ["Daily loss stop", `$${config.limits.maxDailyLossUsd}`],
-    ["Max drawdown", fmtPct(config.limits.maxDrawdownPct, 0)],
-    ["Cooldown", `${config.limits.cooldownSec}s`],
-    ["Tick", `${config.tickIntervalSec}s`],
-    ["Model", MODEL_TIERS.find((m) => m.value === config.modelTier)?.label ?? config.modelTier],
-    ["On HALT", CRASH_MODES.find((m) => m.value === config.crashMode)?.label ?? config.crashMode],
-    ["Commission", `${fmtPct(config.commissionBps / 100, 1)} (${fmtBps(config.commissionBps)} = ${config.commissionBps} bps)`],
-    ["Auto-tune", config.autoTune.enabled ? `on, ±${config.autoTune.maxDeltaPct}%/day` : "off"],
-    ["Commentary", config.publicCommentary],
-    ["Insight sources", String(config.insightSources.length)],
+    ["Total funds", `Up to $${config.limits.maxAllocationUsd}`],
+    ["Open trades", `Up to ${config.limits.maxOpenPositions}`],
+    ["Pauses after a fall of", fmtPct(config.limits.maxDrawdownPct, 0)],
+    ["Decides every", `${config.tickIntervalSec} seconds`],
+    ["AI model", MODEL_TIERS.find((m) => m.value === config.modelTier)?.label ?? config.modelTier],
+    ["In a crash", CRASH_MODES.find((m) => m.value === config.crashMode)?.label ?? config.crashMode],
+    ["Commission", `${fmtPct(config.commissionBps / 100, 1)} of new profit highs`],
+    ["Auto-tune", config.autoTune.enabled ? `On, up to ${config.autoTune.maxDeltaPct}% a day` : "Off"],
+    ["Public commentary", config.publicCommentary === "off" ? "Off" : "Delayed"],
+    ["Extra sources", config.insightSources.length ? String(config.insightSources.length) : "None"],
     [
-      "Fork",
+      "Forking",
       config.fork.forkable
-        ? `$${config.fork.priceUsd.toFixed(2)} USDC · creator ${100 - FORK_PLATFORM_BPS / 100}% / platform ${FORK_PLATFORM_BPS / 100}%`
-        : "not forkable",
+        ? `Allowed at $${config.fork.priceUsd.toFixed(2)} USDC (you keep ${100 - FORK_PLATFORM_BPS / 100}%)`
+        : "Not allowed",
     ],
   ];
 
   return (
-    <div className="flex flex-col gap-3 p-3">
-      <div className="rounded border border-warn/40 bg-warn/10 px-3 py-2 text-[11.5px] text-warn">
-        Demo limits are tiny: ${DEMO_CAPS.maxTradeUsd} per trade, ${DEMO_CAPS.maxAllocationUsd} allocation, $
-        {DEMO_CAPS.maxDailyLossUsd} daily loss, {DEMO_CAPS.maxOpenPositions} open positions. Set by platform env.
-      </div>
-
-      <dl className="num grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-[11.5px]">
+    <div className="flex flex-col gap-4">
+      <dl className="divide-y divide-border rounded-xl border border-border bg-panel">
         {rows.map(([k, v]) => (
-          <div key={k} className="contents">
+          <div key={k} className="grid grid-cols-[9rem_1fr] gap-x-4 px-4 py-2.5 text-sm">
             <dt className="text-muted">{k}</dt>
-            <dd className="min-w-0 text-right text-text">{v}</dd>
+            <dd className="min-w-0 break-words text-text">{v}</dd>
           </div>
         ))}
       </dl>
 
+      <p className="rounded-lg bg-warn-soft px-3 py-2.5 text-sm text-warn">
+        Limits are tiny in this demo: ${DEMO_CAPS.maxTradeUsd} per trade, ${DEMO_CAPS.maxAllocationUsd} total funds, $
+        {DEMO_CAPS.maxDailyLossUsd} daily loss and {DEMO_CAPS.maxOpenPositions} open trades at most.
+      </p>
+
       {errors.length > 0 ? (
-        <ul className="flex flex-col gap-1 rounded border border-short/40 bg-short/10 px-3 py-2 text-[11.5px] text-short">
-          {errors.map((e) => (
-            <li key={e}>{e}</li>
-          ))}
-        </ul>
+        <div role="alert" className="rounded-lg bg-short-soft px-3 py-2.5 text-sm text-short">
+          <div className="font-medium">Fix these before creating:</div>
+          <ul className="mt-1 list-disc pl-5">
+            {errors.map((e) => (
+              <li key={e}>{e}</li>
+            ))}
+          </ul>
+        </div>
       ) : (
         <div>
-          <Badge tone="accent">Config valid</Badge>
+          <Badge tone="success">
+            <IconCheck size={11} strokeWidth={2.5} />
+            Ready to create
+          </Badge>
         </div>
       )}
 
-      <details className="rounded border border-border">
-        <summary className="cursor-pointer px-3 py-1.5 text-[11.5px] text-muted hover:text-text">JSON</summary>
-        <pre className="num max-h-80 overflow-auto border-t border-border p-3 text-[11px] leading-relaxed text-muted">
-          {json}
-        </pre>
+      <details className="rounded-lg border border-border">
+        <summary className="cursor-pointer px-3 py-2 text-sm text-muted hover:text-text">Show raw settings (JSON)</summary>
+        <pre className="num max-h-80 overflow-auto border-t border-border p-3 text-xs leading-relaxed text-muted">{json}</pre>
       </details>
     </div>
   );

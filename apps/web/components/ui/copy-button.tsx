@@ -1,5 +1,6 @@
 "use client";
 
+import { IconCopy } from "@/components/ui/icons";
 import { useToast } from "@/components/ui/toast";
 
 export function CopyButton({ value, label = "Copy" }: { value: string; label?: string }) {
@@ -17,9 +18,10 @@ export function CopyButton({ value, label = "Copy" }: { value: string; label?: s
           toast({ title: "Copy failed", tone: "error" });
         }
       }}
-      className="inline-flex h-5 items-center rounded px-1.5 text-[11px] text-muted hover:bg-panel-2 hover:text-text"
+      className="inline-flex h-6 items-center gap-1 rounded-md px-1.5 text-xs text-muted transition-colors duration-100 hover:bg-panel-2 hover:text-text"
     >
-      {label}
+      <IconCopy size={12} />
+      Copy
     </button>
   );
 }

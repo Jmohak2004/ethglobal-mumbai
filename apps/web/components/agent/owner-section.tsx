@@ -12,11 +12,11 @@ import { GuardrailList } from "@/components/agent/guardrail-list";
 import { LessonsList } from "@/components/agent/lessons-list";
 import { PaperFundingCard } from "@/components/agent/paper-funding-card";
 import { PaperPortfolioCard } from "@/components/agent/paper-portfolio-card";
-import { RunNowButton } from "@/components/agent/run-now-button";
 import { TreasuryCard } from "@/components/agent/treasury-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Panel } from "@/components/ui/panel";
+import { Disclosure } from "@/components/ui/disclosure";
+import { IconLock } from "@/components/ui/icons";
 import { SkeletonRows } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
 import { ApiClientError, describeError, getJson, postJson } from "@/lib/api";
@@ -91,19 +91,23 @@ export function OwnerSection({
     const walletIsOwner = session.address !== null && shortAddr(session.address).toLowerCase() === ownerShort.toLowerCase();
     if (walletIsOwner) {
       return (
-        <div className="flex flex-wrap items-center gap-3 rounded-md border border-dashed border-long/40 px-4 py-3 text-[12px] text-muted">
-          <span>This wallet owns the agent. Sign in once to open the owner console: decision log, guardrail blocks, AI budget and treasury.</span>
-          <Button variant="primary" onClick={signIn}>
-            Sign in to view your agent&apos;s console
-          </Button>
-        </div>
+        <GateCard
+          title="This is your agent"
+          body="Sign in once (a free signature) to open the owner console with the decision log, safety blocks, AI budget and treasury."
+          action={
+            <Button variant="primary" onClick={signIn}>
+              Sign in to open your console
+            </Button>
+          }
+        />
       );
     }
     return (
-      <div className="flex flex-wrap items-center gap-3 rounded-md border border-dashed border-border px-4 py-3 text-[12px] text-muted">
-        <span>Owner console: sign in with the owner wallet to see the decision log, guardrail blocks, AI budget and treasury.</span>
-        {signInButton}
-      </div>
+      <GateCard
+        title="Owner console"
+        body="The decision log, safety blocks, AI budget and treasury are visible only to the owner. Sign in with the owner wallet to see them."
+        action={signInButton}
+      />
     );
   }
 
@@ -113,71 +117,93 @@ export function OwnerSection({
   if (denied) {
     const notOwner = denied.error instanceof ApiClientError && denied.error.code === "FORBIDDEN";
     return (
-      <div className="flex flex-wrap items-center gap-3 rounded-md border border-dashed border-border px-4 py-3 text-[12px] text-muted">
-        <span>{notOwner ? "Only the agent owner can open the owner console. Signed in as a different wallet." : describeError(denied.error)}.</span>
-        {notOwner ? null : signInButton}
-      </div>
+      <GateCard
+        title="Owner console"
+        body={notOwner ? "Only the agent's owner can open this. You are signed in with a different wallet." : `${describeError(denied.error)}.`}
+        action={notOwner ? null : signInButton}
+      />
     );
   }
 
   const episodeList = episodes.data ?? [];
   const ownerRuntime = runtime.data?.viewer === "owner" ? runtime.data : undefined;
-
-  const budgetPanel = (
-    <Panel title="AI budget">
-      {treasury.isPending ? <SkeletonRows rows={4} /> : treasury.data ? <BudgetCard zg={treasury.data.zg} /> : null}
-    </Panel>
-  );
+  const blocks = episodeList.filter((e) => e.verdict.kind === "reject").length;
 
   return (
     <section className="flex flex-col gap-3" aria-label="Owner console">
       <div className="flex flex-wrap items-center gap-2">
-        <h2 className="text-[13px] font-medium">Owner console</h2>
-        <Badge tone="accent">Owner only</Badge>
+        <h2 className="text-lg font-semibold tracking-[-0.012em]">Owner console</h2>
+        <Badge tone="accent">Only you see this</Badge>
         {demo ? <Badge tone="warn">Demo ?owner=1</Badge> : null}
-        <div className="ml-auto flex items-center gap-2">
-          <RunNowButton agentId={agentId} status={status} demo={demo} runtime={runtime.data} />
-          <StatusControl agentId={agentId} status={status} demo={demo} />
-        </div>
       </div>
+      <p className="-mt-1 max-w-2xl text-sm text-muted">
+        Open a section to dig in. The decision log is the best place to start: it shows what the AI expected, what it
+        proposed, and whether the safety rules agreed.
+      </p>
+
+      <Disclosure
+        defaultOpen
+        title="Decision log"
+        description="Every decision the agent made, with the safety verdict and proof of the AI call."
+        right={<Badge>{episodeList.length}</Badge>}
+      >
+        {episodes.isPending ? <SkeletonRows rows={5} /> : <DecisionLog episodes={episodeList} />}
+      </Disclosure>
+
+      <Disclosure
+        title="Safety blocks"
+        description="Times a safety rule stopped a trade the AI wanted."
+        right={<Badge tone={blocks > 0 ? "warn" : "neutral"}>{blocks}</Badge>}
+      >
+        {episodes.isPending ? <SkeletonRows rows={2} /> : <GuardrailList episodes={episodeList} />}
+      </Disclosure>
+
+      <Disclosure title="AI budget" description="How much AI credit is left, and how long it will last.">
+        {treasury.isPending ? <SkeletonRows rows={4} /> : treasury.data ? <BudgetCard zg={treasury.data.zg} /> : null}
+      </Disclosure>
 
       {paper ? (
-        <div className="grid gap-3 md:grid-cols-[1fr_340px]">
-          <PaperFundingCard ledger={ledger.data} loading={ledger.isPending} />
-          {budgetPanel}
-        </div>
+        <Disclosure title="Paper portfolio" description="The practice account: cash, positions and profit.">
+          {runtime.isPending ? <SkeletonRows rows={4} /> : <PaperPortfolioCard portfolio={ownerRuntime?.portfolio} />}
+        </Disclosure>
       ) : null}
 
-      <div className="grid gap-3 xl:grid-cols-[1fr_340px]">
-        <div className="flex min-w-0 flex-col gap-3">
-          <Panel title="Decision log" bodyClassName="overflow-hidden">
-            {episodes.isPending ? <SkeletonRows rows={5} /> : <DecisionLog episodes={episodeList} />}
-          </Panel>
-          <Panel title="Guardrail blocks">
-            {episodes.isPending ? <SkeletonRows rows={2} /> : <GuardrailList episodes={episodeList} />}
-          </Panel>
-          <Panel title="Lessons · memory proof on 0G Storage">
-            {lessons.isPending ? <SkeletonRows rows={3} /> : <LessonsList lessons={lessons.data ?? []} />}
-          </Panel>
-        </div>
+      <Disclosure title="Treasury and withdrawals" description="Commission earned, AI top-ups, and money you can withdraw.">
+        {treasury.isPending ? (
+          <SkeletonRows rows={4} />
+        ) : treasury.data ? (
+          <TreasuryCard treasury={treasury.data} agentId={agentId} demo={demo} />
+        ) : null}
+      </Disclosure>
 
-        <div className="flex min-w-0 flex-col gap-3">
-          {paper ? (
-            <Panel title="Paper portfolio">
-              {runtime.isPending ? <SkeletonRows rows={4} /> : <PaperPortfolioCard portfolio={ownerRuntime?.portfolio} />}
-            </Panel>
-          ) : (
-            budgetPanel
-          )}
-          <Panel title="Treasury">
-            {treasury.isPending ? (
-              <SkeletonRows rows={4} />
-            ) : treasury.data ? (
-              <TreasuryCard treasury={treasury.data} agentId={agentId} demo={demo} />
-            ) : null}
-          </Panel>
-        </div>
+      {paper ? (
+        <Disclosure
+          title="Practice self-funding"
+          description="A simulated version of how an agent turns profit into AI credit."
+          right={<Badge tone="warn">Paper</Badge>}
+        >
+          <PaperFundingCard ledger={ledger.data} loading={ledger.isPending} />
+        </Disclosure>
+      ) : null}
+
+      <Disclosure title="Lessons" description="What the agent learned from past trades, stored as proof on 0G.">
+        {lessons.isPending ? <SkeletonRows rows={3} /> : <LessonsList lessons={lessons.data ?? []} />}
+      </Disclosure>
+    </section>
+  );
+}
+
+function GateCard({ title, body, action }: { title: string; body: string; action: React.ReactNode }) {
+  return (
+    <section aria-label="Owner console" className="flex flex-wrap items-center gap-4 rounded-xl border border-dashed border-border-strong bg-panel px-5 py-4">
+      <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-panel-2 text-muted">
+        <IconLock size={16} />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="text-base font-semibold">{title}</div>
+        <p className="max-w-xl text-sm text-muted">{body}</p>
       </div>
+      {action}
     </section>
   );
 }
@@ -208,7 +234,7 @@ export function StatusControl({ agentId, status, demo }: { agentId: string; stat
   };
 
   return (
-    <Button variant="secondary" size="sm" disabled={busy} onClick={toggle}>
+    <Button variant="secondary" disabled={busy} onClick={toggle}>
       {busy ? "Saving…" : label}
     </Button>
   );

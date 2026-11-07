@@ -2,29 +2,29 @@
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
-import { Tabs, type TabItem } from "@/components/ui/tabs";
+import { Segmented } from "@/components/ui/segmented";
 import { Tooltip } from "@/components/ui/tooltip";
 import { TEMPLATES, TIMEFRAMES } from "@/lib/templates";
 
 type Kind = "agent" | "human" | "all";
 
-const KINDS: TabItem<Kind>[] = [
+const KINDS: { value: Kind; label: string }[] = [
   { value: "agent", label: "Agents" },
   { value: "human", label: "Humans" },
-  { value: "all", label: "All" },
+  { value: "all", label: "Everyone" },
 ];
 
 const MODES = [
-  { value: "all", label: "Live + Paper" },
-  { value: "live", label: "Live" },
-  { value: "paper", label: "Paper" },
+  { value: "all", label: "Live and paper" },
+  { value: "live", label: "Live only" },
+  { value: "paper", label: "Paper only" },
 ];
 
 const selectCls =
-  "h-7 rounded-md border border-border bg-panel px-2 text-[12px] text-text focus:border-link focus:outline-none";
+  "h-9 rounded-lg border border-border-strong bg-panel px-3 text-base text-text shadow-[var(--shadow-card)] transition-[border-color,box-shadow] duration-150 hover:border-subtle focus:border-accent focus:outline-none focus:ring-[3px] focus:ring-accent/20";
 
 /**
- * Kind tabs and filters. State lives in the URL so the server re-renders the leaderboard.
+ * Kind switch and filters. State lives in the URL so the server re-renders the leaderboard.
  * `windowedStats` is false on the DB path, which serves all-time stats only: the timeframe control then shows
  * "All time" alone instead of a filter that does nothing.
  */
@@ -49,15 +49,10 @@ export function LeaderboardControls({ windowedStats }: { windowedStats: boolean 
 
   return (
     <div className="flex flex-wrap items-center justify-between gap-3">
-      <Tabs value={kind} items={KINDS} onChange={(v) => update("kind", v)} className="border-b-0" />
+      <Segmented label="Who to show" value={kind} options={KINDS} onChange={(v) => update("kind", v)} />
       <div className="flex flex-wrap items-center gap-2">
-        <select
-          aria-label="Template"
-          className={selectCls}
-          value={template}
-          onChange={(e) => update("template", e.target.value)}
-        >
-          <option value="all">All templates</option>
+        <select aria-label="Strategy" className={selectCls} value={template} onChange={(e) => update("template", e.target.value)}>
+          <option value="all">All strategies</option>
           {TEMPLATES.map((t) => (
             <option key={t.id} value={t.id}>
               {t.name}
@@ -65,12 +60,7 @@ export function LeaderboardControls({ windowedStats }: { windowedStats: boolean 
           ))}
         </select>
         {windowedStats ? (
-          <select
-            aria-label="Timeframe"
-            className={selectCls}
-            value={timeframe}
-            onChange={(e) => update("timeframe", e.target.value)}
-          >
+          <select aria-label="Time period" className={selectCls} value={timeframe} onChange={(e) => update("timeframe", e.target.value)}>
             {TIMEFRAMES.map((t) => (
               <option key={t.value} value={t.value}>
                 {t.label}
@@ -78,13 +68,13 @@ export function LeaderboardControls({ windowedStats }: { windowedStats: boolean 
             ))}
           </select>
         ) : (
-          <Tooltip side="bottom" align="end" content={<span>windowed stats coming soon</span>}>
-            <select aria-label="Timeframe" aria-disabled="true" className={`${selectCls} cursor-not-allowed opacity-70`} value="all" onChange={() => undefined}>
+          <Tooltip side="bottom" align="end" focusable={false} content="Shorter time periods are coming soon.">
+            <select aria-label="Time period" aria-disabled="true" className={`${selectCls} cursor-not-allowed opacity-70`} value="all" onChange={() => undefined}>
               <option value="all">All time</option>
             </select>
           </Tooltip>
         )}
-        <select aria-label="Mode" className={selectCls} value={mode} onChange={(e) => update("mode", e.target.value)}>
+        <select aria-label="Trading mode" className={selectCls} value={mode} onChange={(e) => update("mode", e.target.value)}>
           {MODES.map((m) => (
             <option key={m.value} value={m.value}>
               {m.label}

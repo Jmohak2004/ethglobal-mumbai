@@ -126,16 +126,16 @@ export function BottomPanel({ activity }: { activity: TradingActivity }) {
   }
 
   return (
-    <section className="flex min-w-0 flex-col rounded-md border border-border bg-panel" aria-label="Account activity">
-      <div className="flex items-center justify-between px-3">
-        <Tabs value={tab} items={TABS} onChange={setTab} className="border-b-0" />
-        {note ? <span className="max-w-md truncate text-[11px] text-muted" title={note}>{note}</span> : null}
+    <section className="flex min-w-0 flex-col rounded-xl border border-border bg-panel shadow-[var(--shadow-card)]" aria-label="Account activity">
+      <div className="flex flex-wrap items-center justify-between gap-2 px-4">
+        <Tabs label="Account activity" value={tab} items={TABS} onChange={setTab} className="border-b-0" />
+        {note ? <span className="max-w-md truncate text-xs text-muted" title={note}>{note}</span> : null}
       </div>
       <div className="overflow-x-auto border-t border-border">
         {tab === "orders" ? (
-          <div className="flex items-center justify-end gap-3 px-3 py-1.5">
-            {busy ? <span className="mr-auto text-[11px] text-muted">{busy}...</span> : null}
-            {liveOrders ? null : <span className="mr-auto text-[11px] text-muted">Paper orders: cancels are simulated.</span>}
+          <div className="flex items-center justify-end gap-3 px-4 py-2">
+            {busy ? <span className="mr-auto text-xs text-muted">{busy}...</span> : null}
+            {liveOrders ? null : <span className="mr-auto text-xs text-muted">Paper orders: cancels are simulated.</span>}
             <Button size="sm" disabled={busy !== null || cancellable.length === 0} onClick={() => cancelRows(cancellable, "Cancelling all")}>
               {liveOrders ? "Cancel all" : "Cancel all (simulated)"}
               {cancellable.length > 0 ? ` (${cancellable.length})` : ""}
@@ -157,12 +157,12 @@ export function BottomPanel({ activity }: { activity: TradingActivity }) {
               </tr>
             </THead>
             <tbody>
-              {openOrders.length === 0 ? <EmptyRow colSpan={8}>No open orders.</EmptyRow> : null}
+              {openOrders.length === 0 ? <EmptyRow colSpan={8}>No open orders. Orders you place will show up here.</EmptyRow> : null}
               {openOrders.map((o) => {
                 const cancelled = cancelledPaper.has(o.id);
                 return (
                   <TR key={o.id}>
-                    <TD className="text-muted">{fmtDateTime(o.ts)}</TD>
+                    <TD className="num text-muted">{fmtDateTime(o.ts)}</TD>
                     <TD>{o.asset}</TD>
                     <TD className={o.side === "buy" ? "text-long" : "text-short"}>{o.side}</TD>
                     <TD>{o.orderType}</TD>
@@ -208,10 +208,10 @@ export function BottomPanel({ activity }: { activity: TradingActivity }) {
               </tr>
             </THead>
             <tbody>
-              {fills.length === 0 ? <EmptyRow colSpan={7}>No fills yet.</EmptyRow> : null}
+              {fills.length === 0 ? <EmptyRow colSpan={7}>No fills yet. Completed trades will show up here.</EmptyRow> : null}
               {fills.map((f) => (
                 <TR key={f.id}>
-                  <TD className="text-muted">{f.ts ? fmtDateTime(f.ts) : "-"}</TD>
+                  <TD className="num text-muted">{f.ts ? fmtDateTime(f.ts) : "-"}</TD>
                   <TD>{f.asset}</TD>
                   <TD className={f.side === "buy" ? "text-long" : "text-short"}>{f.side}</TD>
                   <TD align="right">{fmtUsd(f.sizeUsd)}</TD>
@@ -221,7 +221,7 @@ export function BottomPanel({ activity }: { activity: TradingActivity }) {
                   </TD>
                   <TD>
                     {f.txHash ? (
-                      <a href={txUrl(f.txHash)} target="_blank" rel="noreferrer" className="text-link hover:underline">
+                      <a href={txUrl(f.txHash)} target="_blank" rel="noreferrer" className="text-accent-fg hover:underline">
                         {shortHash(f.txHash)}
                       </a>
                     ) : (

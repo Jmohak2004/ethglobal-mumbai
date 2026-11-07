@@ -8,15 +8,16 @@ import { getJson } from "@/lib/api";
 import type { RiskDisplay, RiskStatus } from "@/lib/types";
 
 const LABEL: Record<RiskDisplay, { text: string; tone: Tone; meaning: string }> = {
-  NORMAL: { text: "NORMAL", tone: "long", meaning: "Market calm. Agents trade normally." },
-  CAUTION: { text: "CAUTION", tone: "warn", meaning: "Market shaky. Half size, no new breakout buys." },
-  HALT: { text: "HALT", tone: "short", meaning: "Crash or danger. No new buys, pending entries cancelled." },
-  UNKNOWN: { text: "UNKNOWN", tone: "muted", meaning: "Risk level could not be read right now. Treat it as unverified." },
+  NORMAL: { text: "Market calm", tone: "long", meaning: "Conditions look normal, so agents trade as usual." },
+  CAUTION: { text: "Market shaky", tone: "warn", meaning: "Things look unsteady. Agents trade at half size and skip breakout buys." },
+  HALT: { text: "Trading paused", tone: "short", meaning: "A crash or danger was detected. Agents stop buying and cancel pending entries." },
+  UNKNOWN: { text: "Status unknown", tone: "muted", meaning: "We could not read the safety signal just now. Treat it as unverified." },
 };
 
 /**
- * Global crash-sentinel light. Starts from the level the layout rendered, then polls /api/risk every 5 s so a level
- * change (CRE report, or a demo control) shows within a few seconds. A failed poll shows UNKNOWN.
+ * Global crash-sentinel light, shown as a friendly status chip. Starts from the level the layout rendered, then polls
+ * /api/risk every 5 s so a level change (CRE report, or a demo control) shows within a few seconds. A failed poll shows
+ * "Status unknown". The raw level (NORMAL, CAUTION, HALT) stays in the tooltip for anyone who wants it.
  */
 export function RiskPill({ level }: { level: RiskDisplay }) {
   const q = useQuery({
@@ -31,10 +32,14 @@ export function RiskPill({ level }: { level: RiskDisplay }) {
     <Tooltip
       side="bottom"
       align="end"
+      label={`Crash light: ${cfg.text}`}
       content={
-        <div className="flex flex-col gap-0.5">
-          <div className="font-medium">Chainlink CRE Crash Sentinel: onchain</div>
-          <div className="text-muted">{cfg.meaning}</div>
+        <div className="flex flex-col gap-1">
+          <div className="font-medium">
+            Crash light: {cfg.text} <span className="num font-normal opacity-70">({current})</span>
+          </div>
+          <div className="opacity-80">{cfg.meaning}</div>
+          <div className="opacity-60">Set onchain by Chainlink and rechecked every few seconds.</div>
         </div>
       }
     >

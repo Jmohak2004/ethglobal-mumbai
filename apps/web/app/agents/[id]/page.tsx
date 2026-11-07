@@ -7,6 +7,7 @@ import { EquityChart } from "@/components/agent/equity-chart";
 import { OwnerSection } from "@/components/agent/owner-section";
 import { StatsGrid } from "@/components/agent/stats-grid";
 import { StrategyPanel } from "@/components/agent/strategy-panel";
+import { Container } from "@/components/ui/page-header";
 import { Panel } from "@/components/ui/panel";
 import { getAgentEquityCurve, getLeaderboard, getPublicAgent } from "@/lib/data";
 import { getTemplate } from "@/lib/templates";
@@ -69,7 +70,7 @@ export default async function AgentPage({
     : null;
 
   return (
-    <div className="flex flex-col gap-3 px-4 py-3">
+    <Container wide className="flex flex-col gap-6 py-8 md:py-10">
       <AgentHeader
         agent={agent}
         stats={resolved}
@@ -78,18 +79,18 @@ export default async function AgentPage({
         forkedFromName={forkedFromName}
       />
 
-      <AgentStatusStrip agentId={agent.id} demo={sp.owner === "1"} />
+      <AgentStatusStrip agentId={agent.id} demo={sp.owner === "1"} status={agent.status} />
 
       <StatsGrid stats={resolved} />
 
-      <div className="grid gap-3 xl:grid-cols-[1fr_340px]">
-        <Panel title="Aggregate equity">
-          <div className="p-3">
+      <div className="grid gap-4 lg:grid-cols-[1fr_340px]">
+        <Panel title="Account value" description="The total value of this agent's account over time. Aggregate only, never individual trades.">
+          <div className="p-4 pt-2">
             <EquityChart points={equity} />
           </div>
         </Panel>
-        <Panel title="Strategy">
-          {template ? <StrategyPanel template={template} /> : <div className="p-3 text-muted">Unknown template.</div>}
+        <Panel title="Strategy" description="How this agent decides.">
+          {template ? <StrategyPanel template={template} /> : <div className="p-4 text-muted">Unknown strategy.</div>}
         </Panel>
       </div>
 
@@ -100,6 +101,6 @@ export default async function AgentPage({
         mode={agent.mode}
         ownerShort={agent.ownerShort}
       />
-    </div>
+    </Container>
   );
 }

@@ -19,14 +19,19 @@ export function StatStrip({
   risk: RiskLevel;
 }) {
   return (
-    <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-      <StatCard label="Agents" value={fmtNum(agents)} sub={`${live} live · ${paper} paper`} />
-      <StatCard label="24h volume" value={fmtCompactUsd(volume24h)} sub="Agents and humans" />
-      <StatCard label="CRE-verified" value={fmtPct(verifiedPct, 0)} sub="Share of agents with a signed report" />
+    <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+      <StatCard label="Agents" value={fmtNum(agents)} sub={`${live} live, ${paper} paper`} />
+      <StatCard label="24h volume" value={fmtCompactUsd(volume24h)} sub="Agents and humans together" />
       <StatCard
-        label="Current risk"
+        label="Verified"
+        value={fmtPct(verifiedPct, 0)}
+        sub="Agents with a signed report"
+        help="Share of agents whose results were re-checked and signed onchain by Chainlink CRE."
+      />
+      <StatCard
+        label="Market safety light"
         value={<RiskPill level={risk} />}
-        sub="Chainlink CRE Crash Sentinel"
+        sub="Agents pause buying if it turns red"
       />
     </div>
   );

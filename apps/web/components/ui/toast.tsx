@@ -38,15 +38,15 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastCtx.Provider value={value}>
       {children}
-      <div className="pointer-events-none fixed bottom-4 right-4 z-[60] flex w-80 flex-col gap-2" aria-live="polite">
+      <div className="pointer-events-none fixed inset-x-4 bottom-4 z-[60] flex flex-col gap-2 sm:left-auto sm:w-80" aria-live="polite">
         {items.map((item) => (
           <div
             key={item.id}
             role="status"
             className={clsx(
-              "pointer-events-auto rounded-md border bg-panel-2 px-3 py-2 text-[12px]",
-              item.tone === "error" && "border-short/60",
-              item.tone === "success" && "border-long/60",
+              "pointer-events-auto animate-pop-in rounded-xl border bg-panel px-3.5 py-3 text-sm shadow-[var(--shadow-pop)]",
+              item.tone === "error" && "border-short/30",
+              item.tone === "success" && "border-long/30",
               item.tone === "default" && "border-border",
             )}
           >

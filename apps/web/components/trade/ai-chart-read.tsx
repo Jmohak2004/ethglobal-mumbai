@@ -25,11 +25,14 @@ export function AiChartRead({
   open,
   onClose,
   market,
+  interval = "5m",
   onPrefill,
 }: {
   open: boolean;
   onClose: () => void;
   market: MarketSnapshot;
+  /** Candle interval label of the chart being read, e.g. "15m". */
+  interval?: string;
   onPrefill: (p: TicketPrefill) => void;
 }) {
   const toast = useToast();
@@ -93,10 +96,10 @@ export function AiChartRead({
   const aiSl = analysis ? Math.round(px * (1 - (analysis.suggestedSliders.stopLossPct ?? 2) / 100) * 100) / 100 : null;
 
   return (
-    <Modal open={open} onClose={onClose} title={`AI chart read · ${market.asset} 5m`} width="max-w-lg">
-      <div className="flex flex-col gap-3 text-[12.5px]">
+    <Modal open={open} onClose={onClose} title={`AI chart read · ${market.asset} ${interval}`} description="Upload a chart for an AI summary, or use the indicator read below." width="max-w-lg">
+      <div className="flex flex-col gap-4 text-base">
         <div
-          className="flex flex-col gap-2 rounded-md border border-dashed border-border p-3"
+          className="flex flex-col gap-2 rounded-xl border border-dashed border-border-strong bg-panel-2/50 p-4"
           tabIndex={0}
           aria-label="Chart image drop zone"
           onDragOver={(e) => e.preventDefault()}
@@ -107,7 +110,7 @@ export function AiChartRead({
           }}
         >
           <div className="flex flex-wrap items-center gap-2">
-            <label className="inline-flex h-7 cursor-pointer items-center rounded-md border border-border bg-panel-2 px-3 text-[12px] font-medium hover:bg-border">
+            <label className="inline-flex h-8 cursor-pointer items-center rounded-lg border border-border-strong bg-panel px-3 text-sm font-medium shadow-[var(--shadow-card)] transition-colors duration-150 focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-accent hover:bg-panel-2">
               Upload chart
               <input
                 type="file"
@@ -119,14 +122,14 @@ export function AiChartRead({
                 }}
               />
             </label>
-            <span className="text-[11.5px] text-muted">or paste a screenshot (Cmd/Ctrl+V)</span>
+            <span className="text-sm text-muted">or paste a screenshot (Cmd/Ctrl+V)</span>
           </div>
           {image ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={image} alt="Chart preview" className="max-h-48 w-full rounded object-contain" />
           ) : null}
           <div className="flex items-center justify-between gap-2">
-            <span className="text-[11px] text-muted">
+            <span className="text-xs text-muted">
               {analysis
                 ? analysis.payer === "user"
                   ? "Billed to your 0G account"
@@ -140,28 +143,28 @@ export function AiChartRead({
         </div>
 
         {analysis ? (
-          <div className="flex flex-col gap-2 rounded-md border border-border p-3">
+          <div className="flex flex-col gap-2 rounded-xl border border-border p-4">
             <div className="flex items-center gap-2">
-              <span className="text-[10.5px] font-medium uppercase tracking-wider text-muted">AI read</span>
+              <span className="text-sm font-medium">AI read</span>
               <Badge tone={analysis.trend === "bullish" ? "accent" : analysis.trend === "bearish" ? "warn" : "neutral"}>
                 {analysis.trend}
               </Badge>
-              {analysis.teeVerified ? <Badge tone="link">TEE verified</Badge> : null}
+              {analysis.teeVerified ? <Badge tone="success">TEE verified</Badge> : null}
             </div>
-            <p className="text-[12px] text-text">{analysis.summary}</p>
-            <div className="num text-[11.5px] text-muted">
+            <p className="text-base text-text">{analysis.summary}</p>
+            <div className="num text-xs text-muted">
               Key levels: {analysis.keyLevels.length ? analysis.keyLevels.map((l) => fmtAmount(l, 2)).join(", ") : "none read"} · template{" "}
               {analysis.suggestedTemplate} · request {analysis.requestId || "n/a"}
             </div>
           </div>
         ) : null}
 
-        <div className="flex flex-col gap-3 rounded-md border border-border p-3">
+        <div className="flex flex-col gap-3 rounded-xl border border-border p-4">
           <div className="flex items-center gap-2">
-            <span className="text-[10.5px] font-medium uppercase tracking-wider text-muted">Indicator read</span>
+            <span className="text-sm font-medium">Indicator read</span>
             <Badge>no AI</Badge>
           </div>
-          <dl className="num grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5">
+          <dl className="num grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-sm [&_dt]:font-sans">
             <dt className="text-muted">Trend</dt>
             <dd>{trend}</dd>
             <dt className="text-muted">Momentum (ROC)</dt>
@@ -179,21 +182,21 @@ export function AiChartRead({
           </dl>
         </div>
 
-        <div className="rounded-md border border-border p-3">
-          <div className="mb-2 text-[10.5px] font-medium uppercase tracking-wider text-muted">
+        <div className="rounded-xl border border-border p-4">
+          <div className="mb-2 text-sm font-medium">
             Suggested bracket {analysis ? "(AI sliders)" : "(ATR)"}
           </div>
           <dl className="num grid grid-cols-3 gap-2 text-center">
             <div>
-              <dt className="text-[10px] text-muted">Entry</dt>
+              <dt className="font-sans text-xs text-muted">Entry</dt>
               <dd>{fmtAmount(entry, 2)}</dd>
             </div>
             <div>
-              <dt className="text-[10px] text-muted">Take-profit</dt>
+              <dt className="font-sans text-xs text-muted">Take-profit</dt>
               <dd className="text-long">{fmtAmount(aiTp ?? tp, 2)}</dd>
             </div>
             <div>
-              <dt className="text-[10px] text-muted">Stop-loss</dt>
+              <dt className="font-sans text-xs text-muted">Stop-loss</dt>
               <dd className="text-short">{fmtAmount(aiSl ?? sl, 2)}</dd>
             </div>
           </dl>

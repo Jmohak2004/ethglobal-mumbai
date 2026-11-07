@@ -5,6 +5,7 @@ import type { AgentStatus } from "@arena/shared";
 import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { IconPlay } from "@/components/ui/icons";
 import { useToast } from "@/components/ui/toast";
 import { describeError, postJson } from "@/lib/api";
 import type { AgentRuntimeView } from "@/lib/types";
@@ -67,18 +68,18 @@ export function RunNowButton({
     });
   };
 
-  const label = run.isPending ? "Queuing…" : queued ? "queued…" : "Run now";
+  const label = run.isPending ? "Queuing…" : queued ? "Queued…" : "Run now";
   const reason =
     status === "active" ? undefined : status === "paused" ? "Resume the agent to run a decision" : "A stopped agent cannot run";
 
   return (
     <Button
-      variant="secondary"
-      size="sm"
+      variant="primary"
       disabled={status !== "active" || run.isPending || queued}
       title={reason ?? "Queue one decision now (paper or live, as configured)"}
       onClick={click}
     >
+      <IconPlay size={13} />
       {label}
     </Button>
   );

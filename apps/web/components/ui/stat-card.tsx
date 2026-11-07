@@ -1,33 +1,45 @@
 import { clsx } from "clsx";
 import type { ReactNode } from "react";
 
-/** Label + big number. tone colours the value (long / short / muted). */
+import { Tooltip } from "@/components/ui/tooltip";
+import { IconInfo } from "@/components/ui/icons";
+
+/** Label, one big number, and a quiet caption. `help` adds a plain-language explanation on hover or focus. */
 export function StatCard({
   label,
   value,
   sub,
   tone,
+  help,
   className,
 }: {
   label: string;
   value: ReactNode;
   sub?: ReactNode;
   tone?: "long" | "short" | "default";
+  help?: ReactNode;
   className?: string;
 }) {
   return (
-    <div className={clsx("flex flex-col gap-1 rounded-md border border-border bg-panel px-3 py-2", className)}>
-      <div className="text-[10.5px] font-medium uppercase tracking-wider text-muted">{label}</div>
+    <div className={clsx("flex flex-col gap-1 rounded-xl border border-border bg-panel px-4 py-3.5 shadow-[var(--shadow-card)]", className)}>
+      <div className="flex items-center gap-1.5 text-sm text-muted">
+        {label}
+        {help ? (
+          <Tooltip content={help} label={`About ${label}`}>
+            <IconInfo size={13} className="text-subtle" />
+          </Tooltip>
+        ) : null}
+      </div>
       <div
         className={clsx(
-          "num text-[16px] font-semibold leading-tight",
+          "num text-xl font-medium leading-7",
           tone === "long" && "text-long",
           tone === "short" && "text-short",
         )}
       >
         {value}
       </div>
-      {sub ? <div className="num text-[11px] text-muted">{sub}</div> : null}
+      {sub ? <div className="text-xs text-muted">{sub}</div> : null}
     </div>
   );
 }

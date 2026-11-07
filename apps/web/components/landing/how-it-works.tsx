@@ -1,57 +1,49 @@
 import Link from "next/link";
+import type { ReactNode } from "react";
 
-import { COMMISSION_BPS } from "@/lib/templates";
 import { LandingSection } from "@/components/landing/section";
+import { Card } from "@/components/ui/card";
+import { IconBolt, IconBrain, IconCoins, IconShield, IconSliders } from "@/components/ui/icons";
+import { COMMISSION_BPS } from "@/lib/templates";
 
 interface Step {
+  icon: ReactNode;
   title: string;
   body: string;
-  /** Where this step shows up in the UI. */
-  shown: string;
-  href?: string;
+  link?: { href: string; label: string };
 }
 
 const STEPS: Step[] = [
   {
+    icon: <IconSliders size={18} />,
     title: "Pick a strategy",
-    body: "Choose a template (Momentum, Mean Reversion, Breakout, Smart DCA or Social Sentiment) and set the sliders and limits.",
-    shown: "Create Agent",
-    href: "/create",
+    body: "Choose a style (trend following, buying dips, breakouts and more) and set simple limits. Defaults are safe.",
+    link: { href: "/create", label: "Create an agent" },
   },
   {
-    title: "AI on 0G decides",
-    body: "The agent sends current prices and its memory to a 0G Private Computer model. The reply is a forecast and a proposed order, with a 0G request ID.",
-    shown: "Decision log: Forecast, Proposed, 0G request",
+    icon: <IconBrain size={18} />,
+    title: "The AI decides",
+    body: "On a schedule, your agent reads market prices and its own notes, then proposes a trade with a forecast. It runs on 0G.",
   },
   {
-    title: "Safety rules check",
-    body: "A plain code policy engine, not AI, approves, clamps or rejects each proposal. It checks allowed coins, size, daily loss and the crash light, and it attaches a take-profit and stop-loss to every buy.",
-    shown: "Decision log: Verdict",
+    icon: <IconShield size={18} />,
+    title: "Safety rules check it",
+    body: "Plain code, not AI, approves, shrinks or blocks every idea. It checks coins, size, daily loss and the market safety light.",
   },
   {
-    title: "Flash executes",
-    body: "Approved orders go to Definitive Flash. In paper mode the quote is real and the fill is simulated. In live mode the order is sent.",
-    shown: "Decision log: Flash order",
+    icon: <IconBolt size={18} />,
+    title: "The trade goes through",
+    body: "Approved orders are placed through Definitive Flash. In paper mode the price is real and the fill is simulated.",
   },
 ];
-
-const VERIFIED = {
-  title: "Verified stats and the crash light",
-  body: "Chainlink CRE reads each agent's Flash fills and real prices, computes PnL and the other stats, and writes a signed report onchain. The same network sets the crash light. Agents check it before every order.",
-};
-
-const SELF_FUNDING = {
-  title: "Agents pay for their own AI",
-  body: "Each agent keeps a commission on new profit highs and converts it to 0G credit, which pays for its AI calls. Paper mode simulates this loop in a paper ledger.",
-};
 
 const LIGHTS = [
-  { name: "NORMAL", tone: "bg-long", what: "Market calm. Agents trade normally." },
-  { name: "CAUTION", tone: "bg-warn", what: "Market shaky. Half size, no new breakout buys." },
-  { name: "HALT", tone: "bg-short", what: "Crash or danger. No new buys, pending entries cancelled." },
+  { name: "Market calm", tone: "bg-long", what: "Agents trade as usual." },
+  { name: "Market shaky", tone: "bg-warn", what: "Half-size trades, no breakout buys." },
+  { name: "Trading paused", tone: "bg-short", what: "No new buys, pending entries cancelled." },
 ];
 
-const LOOP = ["Trade profit", "Commission", "Treasury", "0G credit", "AI calls"];
+const LOOP = ["Profit", "Small commission", "Agent's treasury", "AI credit", "More decisions"];
 
 export function HowItWorks() {
   const commissionDefault = COMMISSION_BPS.default / 100;
@@ -60,79 +52,82 @@ export function HowItWorks() {
     <LandingSection
       id="how-it-works"
       eyebrow="How it works"
-      title="One decision, four checks, one order"
-      lede="Every agent runs the same loop. Each step is visible in the owner console, and the rules are code, not promises."
+      title="From idea to a verified result in four steps"
+      lede="Every agent follows the same loop, and you can see each step on its page."
     >
-      <ol className="grid gap-4 md:grid-cols-4 md:gap-3">
+      <ol className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {STEPS.map((s, i) => (
-          <li key={s.title} className="relative flex flex-col gap-2 rounded-md border border-border bg-panel p-4">
-            <div className="flex items-center gap-2">
-              <span className="num grid size-5 shrink-0 place-items-center rounded border border-border text-[11px] text-accent">
-                {i + 1}
-              </span>
-              <h3 className="text-[13.5px] font-medium">{s.title}</h3>
-            </div>
-            <p className="text-[12.5px] leading-relaxed text-muted">{s.body}</p>
-            <div className="mt-auto pt-1 text-[11px] text-muted">
-              {s.href ? (
-                <Link href={s.href} className="text-link hover:underline">
-                  {s.shown} →
+          <li key={s.title}>
+            <Card className="flex h-full flex-col gap-3 p-5">
+              <div className="flex items-center justify-between">
+                <span className="grid size-9 place-items-center rounded-lg bg-accent-soft text-accent-fg">{s.icon}</span>
+                <span className="num text-sm text-subtle">0{i + 1}</span>
+              </div>
+              <h3 className="text-lg font-semibold tracking-[-0.012em]">{s.title}</h3>
+              <p className="flex-1 text-base text-muted">{s.body}</p>
+              {s.link ? (
+                <Link href={s.link.href} className="text-sm font-medium text-accent-fg hover:underline">
+                  {s.link.label}
                 </Link>
-              ) : (
-                <span className="num">{s.shown}</span>
-              )}
-            </div>
-            {i < STEPS.length - 1 ? (
-              <span
-                aria-hidden="true"
-                className="absolute -bottom-3.5 left-1/2 -translate-x-1/2 text-muted md:-right-2.5 md:bottom-auto md:left-auto md:top-1/2 md:translate-x-0 md:-translate-y-1/2"
-              >
-                <svg viewBox="0 0 8 12" className="size-2.5 rotate-90 md:rotate-0" fill="none" stroke="currentColor" strokeWidth="1.5">
-                  <path d="M1 1l5 5-5 5" />
-                </svg>
-              </span>
-            ) : null}
+              ) : null}
+            </Card>
           </li>
         ))}
       </ol>
 
-      <div className="grid gap-3 md:grid-cols-2">
-        <article className="flex flex-col gap-3 rounded-md border border-border bg-panel p-4">
-          <h3 className="text-[14px] font-medium">{VERIFIED.title}</h3>
-          <p className="text-[12.5px] leading-relaxed text-muted">{VERIFIED.body}</p>
-          <dl className="flex flex-col gap-1.5 rounded-md border border-border bg-bg p-3">
+      <div className="grid gap-4 md:grid-cols-2">
+        <Card className="flex flex-col gap-4 p-5">
+          <div className="flex items-center gap-3">
+            <span className="grid size-9 place-items-center rounded-lg bg-long-soft text-long">
+              <IconShield size={18} />
+            </span>
+            <h3 className="text-lg font-semibold tracking-[-0.012em]">Verified results and a market safety light</h3>
+          </div>
+          <p className="text-base text-muted">
+            Chainlink CRE reads each agent&apos;s real fills and prices, works out profit and the other stats, and signs the
+            report onchain. The same network sets the safety light, which agents check before every order.
+          </p>
+          <dl className="flex flex-col gap-2 rounded-lg bg-panel-2 p-3">
             {LIGHTS.map((l) => (
-              <div key={l.name} className="flex items-center gap-2.5 text-[12px]">
-                <dt className="flex w-[90px] shrink-0 items-center gap-1.5">
-                  <span aria-hidden="true" className={`size-2 rounded-full ${l.tone}`} />
-                  <span className="num font-medium">{l.name}</span>
+              <div key={l.name} className="flex items-center gap-3 text-sm">
+                <dt className="flex w-32 shrink-0 items-center gap-2 font-medium">
+                  <span aria-hidden className={`size-2 rounded-full ${l.tone}`} />
+                  {l.name}
                 </dt>
                 <dd className="text-muted">{l.what}</dd>
               </div>
             ))}
           </dl>
-        </article>
+        </Card>
 
-        <article className="flex flex-col gap-3 rounded-md border border-border bg-panel p-4">
-          <h3 className="text-[14px] font-medium">{SELF_FUNDING.title}</h3>
-          <p className="text-[12.5px] leading-relaxed text-muted">{SELF_FUNDING.body}</p>
-          <ol className="flex flex-wrap items-center gap-1.5 rounded-md border border-border bg-bg p-3 text-[11.5px]">
+        <Card className="flex flex-col gap-4 p-5">
+          <div className="flex items-center gap-3">
+            <span className="grid size-9 place-items-center rounded-lg bg-accent-soft text-accent-fg">
+              <IconCoins size={18} />
+            </span>
+            <h3 className="text-lg font-semibold tracking-[-0.012em]">Agents pay for their own AI</h3>
+          </div>
+          <p className="text-base text-muted">
+            An agent keeps a small commission on new profit highs and turns it into 0G credit, which pays for its AI calls.
+            Paper mode simulates this loop in a practice ledger.
+          </p>
+          <ol className="flex flex-wrap items-center gap-1.5 rounded-lg bg-panel-2 p-3 text-sm">
             {LOOP.map((step, i) => (
               <li key={step} className="flex items-center gap-1.5">
-                <span className="num rounded border border-border bg-panel-2 px-2 py-0.5">{step}</span>
+                <span className="rounded-md bg-panel px-2 py-0.5 ring-1 ring-inset ring-border">{step}</span>
                 {i < LOOP.length - 1 ? (
-                  <span aria-hidden="true" className="text-muted">
+                  <span aria-hidden className="text-subtle">
                     →
                   </span>
                 ) : null}
               </li>
             ))}
           </ol>
-          <p className="text-[11.5px] text-muted">
-            The owner sets the commission rate from 0% to {commissionMax}%. The default is {commissionDefault}%, and it is
-            only charged on new profit highs.
+          <p className="text-sm text-muted">
+            The owner picks the commission from 0% to {commissionMax}% (default {commissionDefault}%). It is only charged on
+            new highs, never on winning back old losses.
           </p>
-        </article>
+        </Card>
       </div>
     </LandingSection>
   );

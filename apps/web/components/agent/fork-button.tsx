@@ -6,6 +6,7 @@ import { useState } from "react";
 import { useAccount } from "wagmi";
 
 import { Button } from "@/components/ui/button";
+import { IconFork } from "@/components/ui/icons";
 import { useToast } from "@/components/ui/toast";
 import { describeError, postJson } from "@/lib/api";
 import { CONTRACTS } from "@/lib/contracts";
@@ -75,12 +76,13 @@ export function ForkButton({
 
   return (
     <div className="flex flex-col items-end gap-0.5">
-      <Button variant="long" disabled={!forkable || !deployed || busy !== null} onClick={onClick}>
+      <Button variant="primary" disabled={!forkable || !deployed || busy !== null} onClick={onClick}>
+        <IconFork size={14} />
         {label}
       </Button>
       {forkable ? (
-        <div className="num text-[10.5px] text-muted">
-          creator {creatorPct}% / platform {platformPct}%
+        <div className="text-xs text-muted" title="Forking copies this agent's setup into a paper agent of your own.">
+          Creator {creatorPct}% / platform {platformPct}%
         </div>
       ) : null}
     </div>

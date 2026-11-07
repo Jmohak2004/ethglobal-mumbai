@@ -1,8 +1,11 @@
 import { clsx } from "clsx";
 import type { ReactNode } from "react";
 
+import { Container } from "@/components/ui/page-header";
+
 /**
- * Landing section: an anchor target (scroll-mt-16 clears the sticky top nav), with an eyebrow, a heading and a lede.
+ * Landing section: an anchor target with a small eyebrow, a heading and a one-sentence lede. Generous vertical space,
+ * no divider lines between sections (whitespace does that job).
  */
 export function LandingSection({
   id,
@@ -10,26 +13,28 @@ export function LandingSection({
   title,
   lede,
   children,
+  className,
 }: {
   id: string;
   eyebrow?: string;
   title: string;
   lede?: string;
   children: ReactNode;
+  className?: string;
 }) {
   const titleId = `${id}-title`;
   return (
-    <section id={id} aria-labelledby={titleId} className="scroll-mt-16 border-t border-border px-4 py-10 md:px-8 md:py-12">
-      <div className="mx-auto flex max-w-5xl flex-col gap-6">
-        <header className="flex flex-col gap-2">
-          {eyebrow ? <p className="text-[10.5px] font-medium uppercase tracking-wider text-accent">{eyebrow}</p> : null}
-          <h2 id={titleId} className="text-[22px] font-semibold tracking-tight md:text-[26px]">
+    <section id={id} aria-labelledby={titleId} className={clsx("py-14 md:py-20", className)}>
+      <Container>
+        <header className="mb-8 flex max-w-2xl flex-col gap-2 md:mb-10">
+          {eyebrow ? <p className="text-sm font-medium text-accent-fg">{eyebrow}</p> : null}
+          <h2 id={titleId} className="text-2xl font-semibold tracking-[-0.022em] md:text-3xl">
             {title}
           </h2>
-          {lede ? <p className="max-w-2xl text-[13.5px] leading-relaxed text-muted">{lede}</p> : null}
+          {lede ? <p className="text-lg text-muted">{lede}</p> : null}
         </header>
-        {children}
-      </div>
+        <div className="flex flex-col gap-6">{children}</div>
+      </Container>
     </section>
   );
 }

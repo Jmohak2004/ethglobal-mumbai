@@ -10,6 +10,7 @@ import { MarketsList } from "@/components/trade/markets-list";
 import { OrderTicket, type TicketPrefill } from "@/components/trade/order-ticket";
 import { PriceChart } from "@/components/trade/price-chart";
 import { Button } from "@/components/ui/button";
+import { Container } from "@/components/ui/page-header";
 import { Panel } from "@/components/ui/panel";
 import { Segmented } from "@/components/ui/segmented";
 import { getJson } from "@/lib/api";
@@ -40,7 +41,7 @@ function syncUrl(params: Record<string, string>): void {
   window.history.replaceState(window.history.state, "", url);
 }
 
-/** Hyperliquid-style terminal: markets list, live header, chart, order ticket. Prices stream over one WebSocket. */
+/** Terminal: markets list, live header, chart, order ticket. Prices stream over one WebSocket. */
 export function TradeTerminal({ assets, products, feeds, initial, activity }: Props) {
   const [asset, setAsset] = useState(initial.asset);
   const [granularity, setGranularity] = useState(initial.granularity);
@@ -80,7 +81,7 @@ export function TradeTerminal({ assets, products, feeds, initial, activity }: Pr
   };
 
   return (
-    <div className="flex flex-col gap-3 px-4 py-3">
+    <Container wide className="flex flex-col gap-4 py-5">
       <AssetHeader
         asset={asset}
         product={product ?? asset}
@@ -90,15 +91,17 @@ export function TradeTerminal({ assets, products, feeds, initial, activity }: Pr
         feedAddress={feeds[asset] ?? null}
       />
 
-      <div className="grid items-start gap-3 xl:grid-cols-[240px_minmax(0,1fr)_340px]">
+      <div className="grid items-start gap-4 xl:grid-cols-[250px_minmax(0,1fr)_340px]">
         <MarketsList assets={assets} products={products} active={asset} onSelect={selectAsset} />
 
-        <div className="flex min-w-0 flex-col gap-3">
+        <div className="flex min-w-0 flex-col gap-4">
           <Panel
-            title={`${asset} · ${intervalLabel(granularity)} candles`}
+            title={`${asset} price`}
+            description={`${intervalLabel(granularity)} candles, updating live`}
             right={
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <Segmented
+                  label="Chart interval"
                   value={String(granularity)}
                   options={INTERVALS.map((i) => ({ value: String(i.seconds), label: i.label }))}
                   onChange={(v) => selectInterval(Number(v))}
@@ -113,7 +116,7 @@ export function TradeTerminal({ assets, products, feeds, initial, activity }: Pr
               {data && product ? (
                 <PriceChart asset={asset} product={data.product} granularity={granularity} candles={data.candles} />
               ) : (
-                <div className="grid h-full place-items-center text-[12px] text-muted">
+                <div className="grid h-full place-items-center text-base text-muted">
                   {market.isError ? "Market data is unavailable. Retrying automatically." : "Loading market data…"}
                 </div>
               )}
@@ -131,7 +134,7 @@ export function TradeTerminal({ assets, products, feeds, initial, activity }: Pr
           />
         ) : (
           <Panel title="Order ticket">
-            <div className="p-3 text-[12px] text-muted">The ticket opens once a live mark price is available.</div>
+            <div className="p-4 text-sm text-muted">The ticket opens once a live price is available.</div>
           </Panel>
         )}
       </div>
@@ -141,9 +144,10 @@ export function TradeTerminal({ assets, products, feeds, initial, activity }: Pr
           open={aiOpen}
           onClose={() => setAiOpen(false)}
           market={data}
+          interval={intervalLabel(granularity)}
           onPrefill={(values) => setPrefill((p) => ({ nonce: (p?.nonce ?? 0) + 1, values }))}
         />
       ) : null}
-    </div>
+    </Container>
   );
 }

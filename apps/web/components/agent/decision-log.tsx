@@ -2,6 +2,8 @@ import type { Episode, PolicyVerdict } from "@arena/shared";
 
 import { Badge } from "@/components/ui/badge";
 import { CopyButton } from "@/components/ui/copy-button";
+import { EmptyState } from "@/components/ui/empty-state";
+import { IconClock } from "@/components/ui/icons";
 import { Pill, type Tone } from "@/components/ui/pill";
 import { EmptyRow, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { Tooltip } from "@/components/ui/tooltip";
@@ -14,10 +16,17 @@ const VERDICT_TONE: Record<PolicyVerdict["kind"], Tone> = {
   noop: "muted",
 };
 
-const ARROW: Record<"up" | "down" | "flat", { glyph: string; cls: string }> = {
-  up: { glyph: "▲", cls: "text-long" },
-  down: { glyph: "▼", cls: "text-short" },
-  flat: { glyph: "▬", cls: "text-muted" },
+const VERDICT_LABEL: Record<PolicyVerdict["kind"], string> = {
+  approve: "Approved",
+  clamp: "Resized",
+  reject: "Blocked",
+  noop: "No action",
+};
+
+const ARROW: Record<"up" | "down" | "flat", { glyph: string; cls: string; word: string }> = {
+  up: { glyph: "▲", cls: "text-long", word: "up" },
+  down: { glyph: "▼", cls: "text-short", word: "down" },
+  flat: { glyph: "▬", cls: "text-muted", word: "flat" },
 };
 
 function utcShort(ts: number): string {
@@ -26,16 +35,26 @@ function utcShort(ts: number): string {
 
 /** Owner decision log: forecast, proposal, policy verdict, 0G request id and Flash order. */
 export function DecisionLog({ episodes }: { episodes: Episode[] }) {
+  if (episodes.length === 0) {
+    return (
+      <EmptyState
+        compact
+        icon={<IconClock size={18} />}
+        title="No decisions yet"
+        description="Press Run now above, or wait for the next scheduled decision. Each one will show up here."
+      />
+    );
+  }
   return (
     <Table bare>
       <THead>
         <tr>
           <TH>Time (UTC)</TH>
-          <TH>Forecast</TH>
-          <TH>Proposed</TH>
-          <TH>Verdict</TH>
-          <TH>0G request</TH>
-          <TH>Flash order</TH>
+          <TH>AI expected</TH>
+          <TH>AI proposed</TH>
+          <TH>Safety check</TH>
+          <TH>Proof (0G)</TH>
+          <TH>Order</TH>
         </tr>
       </THead>
       <tbody>
@@ -58,11 +77,11 @@ function DecisionRow({ e }: { e: Episode }) {
 
   return (
     <TR>
-      <TD className="text-muted">{utcShort(e.ts)}</TD>
+      <TD className="num text-muted">{utcShort(e.ts)}</TD>
       <TD>
         {f && arrow ? (
           <span>
-            <span className={arrow.cls}>{arrow.glyph}</span> {f.asset} {fmtPct(f.expectedMovePct, 1, true)} /{" "}
+            <span className={arrow.cls} role="img" aria-label={arrow.word}>{arrow.glyph}</span> {f.asset} {fmtPct(f.expectedMovePct, 1, true)} /{" "}
             {f.horizonMin / 60}h · {Math.round(f.confidence * 100)}%
           </span>
         ) : (
@@ -81,7 +100,7 @@ function DecisionRow({ e }: { e: Episode }) {
               : ""}
           </span>
         ) : (
-          <span className="text-short">{e.error ?? "no proposal"}</span>
+          <span className="text-short">{e.error ?? "No proposal"}</span>
         )}
       </TD>
       <TD>
@@ -95,15 +114,15 @@ function DecisionRow({ e }: { e: Episode }) {
             </ul>
           }
         >
-          <Pill tone={VERDICT_TONE[e.verdict.kind]}>{e.verdict.kind}</Pill>
+          <Pill tone={VERDICT_TONE[e.verdict.kind]}>{VERDICT_LABEL[e.verdict.kind]}</Pill>
         </Tooltip>
       </TD>
       <TD>
         {e.inference ? (
           <span className="inline-flex items-center gap-1.5">
-            <span className="text-text">{shortHash(e.inference.requestId)}</span>
+            <span className="num text-text">{shortHash(e.inference.requestId)}</span>
             <CopyButton value={e.inference.requestId} label="Copy" />
-            {e.inference.teeVerified ? <Badge tone="accent">TEE ✓</Badge> : null}
+            {e.inference.teeVerified ? <Badge tone="success">Verified</Badge> : null}
           </span>
         ) : (
           <span className="text-muted">n/a</span>
@@ -111,11 +130,11 @@ function DecisionRow({ e }: { e: Episode }) {
       </TD>
       <TD>
         {flashId ? (
-          <a href={flashOrderUrl(flashId)} target="_blank" rel="noreferrer" className="text-link hover:underline">
+          <a href={flashOrderUrl(flashId)} target="_blank" rel="noreferrer" className="num text-accent-fg hover:underline">
             {flashId}
           </a>
         ) : (
-          <span className="text-muted">none</span>
+          <span className="text-muted">None</span>
         )}
       </TD>
     </TR>

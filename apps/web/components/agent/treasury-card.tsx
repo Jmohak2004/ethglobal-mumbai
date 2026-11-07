@@ -63,21 +63,21 @@ export function TreasuryCard({ treasury, agentId, demo }: { treasury: AgentTreas
   };
 
   return (
-    <div className="flex flex-col gap-3 p-3">
-      <dl className="num grid grid-cols-2 gap-y-1.5 text-[12px]">
+    <div className="flex flex-col gap-4 p-4">
+      <dl className="num grid grid-cols-2 gap-y-2 text-sm [&_dt]:font-sans">
         <dt className="text-muted">Treasury balance</dt>
         <dd className="text-right">{fmtUsd(treasury.balanceUsd, 4)}</dd>
-        <dt className="text-muted">Reserve (3 days)</dt>
+        <dt className="text-muted">Kept in reserve (3 days of AI)</dt>
         <dd className="text-right">{fmtUsd(treasury.reserveUsd, 4)}</dd>
-        <dt className="text-muted">Withdrawable</dt>
+        <dt className="text-muted">You can withdraw</dt>
         <dd className="text-right text-long">
-          {fmtUsd(withdrawable, 4)} <span className="text-muted">{deployed && onchain.data !== undefined ? "on-chain" : "estimate"}</span>
+          {fmtUsd(withdrawable, 4)} <span className="text-muted">{deployed && onchain.data !== undefined ? "onchain" : "estimate"}</span>
         </dd>
-        <dt className="text-muted">Commission owed</dt>
+        <dt className="text-muted">Commission to pay</dt>
         <dd className="text-right">
           {fmtUsd(treasury.commissionOwedUsd, 4)} <span className="text-muted">@ {fmtBps(treasury.commissionBps)}</span>
         </dd>
-        <dt className="text-muted">Commission paid</dt>
+        <dt className="text-muted">Commission paid so far</dt>
         <dd className="text-right">{fmtUsd(treasury.commissionPaidUsd, 4)}</dd>
       </dl>
 
@@ -109,13 +109,13 @@ export function TreasuryCard({ treasury, agentId, demo }: { treasury: AgentTreas
       )}
 
       <div>
-        <div className="mb-1 text-[10.5px] font-medium uppercase tracking-wider text-muted">Recent top-ups</div>
+        <div className="mb-1 text-sm font-medium text-text">Recent AI top-ups</div>
         {treasury.topUps.length === 0 ? (
-          <div className="text-[12px] text-muted">No top-ups yet.</div>
+          <div className="text-sm text-muted">None yet. Top-ups appear when the agent converts commission into AI credit.</div>
         ) : (
           <ul className="flex flex-col divide-y divide-border">
             {treasury.topUps.map((t) => (
-              <li key={t.id} className="flex flex-col gap-1 py-2 text-[11.5px]">
+              <li key={t.id} className="flex flex-col gap-1 py-2.5 text-sm">
                 <div className="flex items-center justify-between">
                   <span className="num text-muted">{fmtDateTime(t.ts)}</span>
                   <Pill tone={TOPUP_TONE[t.status]}>{t.status}</Pill>
@@ -123,7 +123,7 @@ export function TreasuryCard({ treasury, agentId, demo }: { treasury: AgentTreas
                 <div className="num">
                   {fmtUsd(t.usdcAmount, 2)} USDC → {fmtAmount(t.zgAmount, 2)} 0G
                 </div>
-                <div className="num flex flex-wrap gap-x-3 text-link">
+                <div className="num flex flex-wrap gap-x-3 text-accent-fg">
                   <a href={txUrl(t.basePayTx)} target="_blank" rel="noreferrer" className="hover:underline">
                     Base {shortHash(t.basePayTx)}
                   </a>

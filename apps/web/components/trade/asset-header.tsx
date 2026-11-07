@@ -37,19 +37,19 @@ export function AssetHeader({
   const base = product.split("-")[0] ?? asset;
 
   return (
-    <div className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-md border border-border bg-panel px-3 py-2">
+    <div className="flex flex-wrap items-center gap-x-8 gap-y-3 rounded-xl border border-border bg-panel px-5 py-4 shadow-[var(--shadow-card)]">
       <div className="flex items-center gap-2">
-        <h1 className="text-[16px] font-semibold">{asset}</h1>
-        <span className="num text-[11px] text-muted">{product}</span>
-        <span className="rounded border border-border px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-muted">
+        <h1 className="text-xl font-semibold tracking-[-0.015em]">{asset}</h1>
+        <span className="num text-xs text-muted">{product}</span>
+        <span className="rounded-md bg-panel-2 px-1.5 py-0.5 text-xs text-muted ring-1 ring-inset ring-border">
           {categoryOf(asset)}
         </span>
       </div>
       <div className="num flex items-baseline gap-2">
-        <span className={`text-[20px] font-semibold ${priceClass}`}>{price === null ? "—" : formatUsdPrice(price)}</span>
-        <span className="text-[11px] text-muted">last</span>
+        <span className={`text-2xl font-medium ${priceClass}`}>{price === null ? "—" : formatUsdPrice(price)}</span>
+        <span className="font-sans text-xs text-muted">last price</span>
       </div>
-      <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-[11.5px]">
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
         <Stat
           label="24h change"
           value={change === null ? "—" : fmtPct(change, 2, true)}
@@ -69,17 +69,17 @@ export function AssetHeader({
           content={
             <div className="flex flex-col gap-0.5">
               <div className="font-medium">{feedAddress ? "Chainlink Data Feed (Base)" : "No Chainlink feed on Base"}</div>
-              <div className="text-muted">
+              <div className="opacity-80">
                 Mark for the order ticket is the last Coinbase trade price. Stop and TP triggers are evaluated by Flash,
                 not by this feed.
               </div>
-              <div className="text-muted">
+              <div className="opacity-80">
                 Price streams from the Coinbase Exchange ticker channel. If the socket is blocked, it polls every 15 s.
               </div>
             </div>
           }
         >
-          <span className="num rounded border border-border px-2 py-1 text-[11px] text-muted">
+          <span className="num rounded-md bg-panel-2 px-2 py-1 text-xs text-muted ring-1 ring-inset ring-border">
             {feedAddress ? `Chainlink ${base}/USD · ${shortAddr(feedAddress, 6, 4)}` : `Mark: Coinbase ${product}`}
           </span>
         </Tooltip>
@@ -92,8 +92,8 @@ function FeedPill({ status }: { status: FeedStatus }) {
   const live = status === "open";
   const label = live ? "Live" : status === "connecting" ? "Connecting" : status === "down" ? "Polling 15 s" : "Paused";
   return (
-    <span className="num inline-flex items-center gap-1.5 rounded border border-border px-2 py-1 text-[11px] text-muted">
-      <span className={`h-1.5 w-1.5 rounded-full ${live ? "bg-long" : "bg-border-strong"}`} />
+    <span className="inline-flex items-center gap-1.5 rounded-md bg-panel-2 px-2 py-1 text-xs text-muted ring-1 ring-inset ring-border">
+      <span aria-hidden className={`size-1.5 rounded-full ${live ? "bg-long" : "bg-subtle"}`} />
       {label}
     </span>
   );
@@ -102,7 +102,7 @@ function FeedPill({ status }: { status: FeedStatus }) {
 function Stat({ label, value, className }: { label: string; value: string; className?: string }) {
   return (
     <div className="flex flex-col">
-      <span className="text-[10px] uppercase tracking-wider text-muted">{label}</span>
+      <span className="text-xs text-muted">{label}</span>
       <span className={`num ${className ?? "text-text"}`}>{value}</span>
     </div>
   );

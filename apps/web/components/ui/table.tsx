@@ -1,17 +1,28 @@
 import { clsx } from "clsx";
 import type { MouseEvent, ReactNode } from "react";
 
-/** Dense table shell. Horizontal scroll on small screens; no shadows. `bare` drops the frame (for use inside a Panel). */
-export function Table({ children, className, bare }: { children: ReactNode; className?: string; bare?: boolean }) {
+/** Calm table shell. Horizontal scroll on small screens. `bare` drops the frame (for use inside a card). */
+export function Table({
+  children,
+  className,
+  bare,
+  scroll = true,
+}: {
+  children: ReactNode;
+  className?: string;
+  bare?: boolean;
+  /** Set false when the columns always fit, so hover tooltips are not clipped by the scroll container. */
+  scroll?: boolean;
+}) {
   return (
-    <div className={clsx("overflow-x-auto", !bare && "rounded-md border border-border bg-panel", className)}>
-      <table className="num w-full border-collapse text-[12px]">{children}</table>
+    <div className={clsx(scroll && "overflow-x-auto", !bare && "rounded-xl border border-border bg-panel shadow-[var(--shadow-card)]", className)}>
+      <table className="w-full border-collapse text-base">{children}</table>
     </div>
   );
 }
 
 export function THead({ children }: { children: ReactNode }) {
-  return <thead className="sticky top-0 bg-panel">{children}</thead>;
+  return <thead>{children}</thead>;
 }
 
 export function TH({
@@ -27,7 +38,7 @@ export function TH({
     <th
       scope="col"
       className={clsx(
-        "h-8 whitespace-nowrap border-b border-border px-2 text-[10.5px] font-medium uppercase tracking-wider text-muted",
+        "h-10 whitespace-nowrap border-b border-border px-3 text-xs font-medium text-muted first:pl-4 last:pr-4",
         align === "right" && "text-right",
         align === "center" && "text-center",
         align === "left" && "text-left",
@@ -52,7 +63,7 @@ export function TR({
     <tr
       onClick={onClick}
       className={clsx(
-        "h-8 border-b border-border/60 last:border-b-0 hover:bg-panel-2",
+        "border-b border-border last:border-b-0 transition-colors duration-100 hover:bg-panel-2/70",
         onClick && "cursor-pointer",
         className,
       )}
@@ -77,8 +88,8 @@ export function TD({
     <td
       colSpan={colSpan}
       className={clsx(
-        "whitespace-nowrap px-2 py-1 align-middle",
-        align === "right" && "text-right",
+        "h-12 whitespace-nowrap px-3 align-middle first:pl-4 last:pr-4",
+        align === "right" && "num text-right",
         align === "center" && "text-center",
         align === "left" && "text-left",
         className,
@@ -92,7 +103,7 @@ export function TD({
 export function EmptyRow({ colSpan, children }: { colSpan: number; children: ReactNode }) {
   return (
     <tr>
-      <td colSpan={colSpan} className="px-3 py-6 text-center text-[12px] text-muted">
+      <td colSpan={colSpan} className="px-4 py-10 text-center text-base text-muted">
         {children}
       </td>
     </tr>

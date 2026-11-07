@@ -3,6 +3,7 @@ import { Suspense } from "react";
 import { LeaderboardControls } from "@/components/leaderboard/leaderboard-controls";
 import { LeaderboardTable } from "@/components/leaderboard/leaderboard-table";
 import { StatStrip } from "@/components/leaderboard/stat-strip";
+import { Container, PageHeader } from "@/components/ui/page-header";
 import { getLeaderboard, getRisk, parseLeaderboardQuery } from "@/lib/data";
 import { dbConfigured } from "@/lib/server/db";
 
@@ -32,16 +33,22 @@ export default async function LeaderboardPage({
   };
 
   return (
-    <div className="flex flex-col gap-3 px-4 py-3">
+    <Container wide className="flex flex-col gap-6 py-8 md:py-10">
+      <PageHeader
+        title="Leaderboard"
+        description="See which AI agents and people are doing best. Open any agent to watch how it decides."
+      />
       <StatStrip {...stats} />
-      <Suspense fallback={null}>
-        <LeaderboardControls windowedStats={!dbConfigured()} />
-      </Suspense>
-      <LeaderboardTable rows={rows} />
-      <p className="text-[11px] text-muted">
-        Stats only. Trades, configs and sliders are visible to owners and forkers. Stats are computed by Chainlink CRE from
-        Flash fills and signed onchain.
+      <div className="flex flex-col gap-4">
+        <Suspense fallback={null}>
+          <LeaderboardControls windowedStats={!dbConfigured()} />
+        </Suspense>
+        <LeaderboardTable rows={rows} />
+      </div>
+      <p className="max-w-2xl text-sm text-muted">
+        Only results are public: trades, settings and sliders stay private to owners and people who copy an agent. Results
+        are computed by Chainlink CRE from real fills and signed onchain.
       </p>
-    </div>
+    </Container>
   );
 }

@@ -10,13 +10,16 @@ import { useAccount } from "wagmi";
 
 import { WalletButton } from "@/components/layout/wallet-button";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, ButtonLink } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
+import { IconBot, IconWallet } from "@/components/ui/icons";
+import { Container, PageHeader } from "@/components/ui/page-header";
+import { StatCard } from "@/components/ui/stat-card";
 import { Field, Input, Switch } from "@/components/ui/form";
 import { Modal } from "@/components/ui/modal";
 import { Panel } from "@/components/ui/panel";
 import { Pill, type Tone } from "@/components/ui/pill";
 import { SkeletonRows } from "@/components/ui/skeleton";
-import { EmptyRow, TD, TH, THead, TR, Table } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
 import { describeError, getJson, postJson } from "@/lib/api";
 import { CONTRACTS } from "@/lib/contracts";
@@ -32,6 +35,8 @@ const TELEGRAM_BOT = process.env.NEXT_PUBLIC_TELEGRAM_BOT || "arena_demo_bot";
 const UNPROVISIONED = "0x0000000000000000000000000000000000000000";
 
 const STATUS_TONE: Record<OwnedAgent["status"], Tone> = { active: "long", paused: "warn", stopped: "muted" };
+const STATUS_LABEL: Record<OwnedAgent["status"], string> = { active: "Active", paused: "Paused", stopped: "Stopped" };
+const TIER_LABEL: Record<OwnedAgent["budgetTier"], string> = { healthy: "Healthy", low: "Low", critical: "Critical", empty: "Empty" };
 const TIER_TONE: Record<OwnedAgent["budgetTier"], Tone> = {
   healthy: "long",
   low: "warn",
@@ -61,63 +66,90 @@ export function PortfolioView() {
 
   if (!owner) {
     return (
-      <Panel title="Portfolio">
-        <div className="flex flex-col items-start gap-3 p-4">
-          <p className="text-[12.5px] text-muted">Connect a wallet to see the agents you own and your Humans board stats.</p>
-          <div className="flex items-center gap-3">
-            <WalletButton />
-            <Link href="/portfolio?owner=1" className="text-[12px] text-link hover:underline">
-              View the demo owner
-            </Link>
-          </div>
+      <Container className="py-8 md:py-10">
+        <PageHeader title="Portfolio" description="Your agents, their earnings, and your place on the Humans board." />
+        <div className="mt-8 rounded-xl border border-border bg-panel shadow-[var(--shadow-card)]">
+          <EmptyState
+            icon={<IconWallet size={18} />}
+            title="Connect a wallet to get started"
+            description="Your portfolio lists the agents you own and your Humans board stats. Browsing the leaderboard needs no wallet."
+            action={
+              <div className="flex flex-col items-center gap-3">
+                <WalletButton size="lg" />
+                <Link href="/portfolio?owner=1" className="text-sm text-accent-fg hover:underline">
+                  Or look at the demo owner
+                </Link>
+              </div>
+            }
+          />
         </div>
-      </Panel>
+      </Container>
     );
   }
 
+  const list = agents.data ?? [];
+  const totalPnl = list.reduce((sum, a) => sum + (a.stats?.realizedPnlUsd ?? 0), 0);
+  const totalWithdrawable = list.reduce((sum, a) => sum + a.withdrawableUsd, 0);
+
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <h1 className="text-[16px] font-semibold">Portfolio</h1>
-        <span className="num text-[12px] text-muted">{shortAddr(owner)}</span>
-        {demo && !isConnected ? <Badge tone="warn">Demo ?owner=1</Badge> : null}
-      </div>
+    <Container className="flex flex-col gap-8 py-8 md:py-10">
+      <PageHeader
+        title="Portfolio"
+        description={
+          <span className="inline-flex flex-wrap items-center gap-2">
+            Your agents and earnings. Wallet <span className="num text-text-2">{shortAddr(owner)}</span>
+            {demo && !isConnected ? <Badge tone="warn">Demo ?owner=1</Badge> : null}
+          </span>
+        }
+        actions={
+          <ButtonLink href="/create" variant="primary">
+            New agent
+          </ButtonLink>
+        }
+      />
 
-      <div className="grid items-start gap-3 xl:grid-cols-[1fr_340px]">
-        <Panel
-          title="My agents"
-          right={
-            <Link href="/create" className="text-[12px] text-link hover:underline">
-              New agent
-            </Link>
-          }
-        >
-          {!canList ? (
-            <div className="flex flex-wrap items-center gap-3 p-3 text-[12px] text-muted">
-              <span>Sign in with your wallet to list the agents you own.</span>
-              <Button variant="secondary" onClick={() => session.signIn().catch(() => undefined)}>
-                Sign in
-              </Button>
-            </div>
-          ) : agents.isPending ? (
-            <SkeletonRows rows={3} />
-          ) : agents.isError ? (
-            <div className="p-3 text-[12px] text-short">{describeError(agents.error)}</div>
-          ) : (
-            <MyAgentsTable agents={agents.data ?? []} demo={demo && !isConnected} />
-          )}
-        </Panel>
-
-        <div className="flex flex-col gap-3">
-          <HumanCard owner={owner} stats={human.data ?? null} loading={human.isPending} signedIn={session.signedIn} />
-          <TelegramCard />
+      {canList && agents.isSuccess ? (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <StatCard label="Agents" value={String(list.length)} sub={`${list.filter((a) => a.status === "active").length} active`} />
+          <StatCard label="Total profit" value={fmtUsdSigned(totalPnl)} tone={totalPnl >= 0 ? "long" : "short"} sub="Across all your agents" />
+          <StatCard label="Ready to withdraw" value={fmtUsd(totalWithdrawable, 2)} sub="Earned commission" />
         </div>
+      ) : null}
+
+      <section aria-label="My agents" className="flex flex-col gap-3">
+        <h2 className="text-lg font-semibold tracking-[-0.012em]">My agents</h2>
+        {!canList ? (
+          <div className="rounded-xl border border-border bg-panel shadow-[var(--shadow-card)]">
+            <EmptyState
+              compact
+              icon={<IconBot size={18} />}
+              title="Sign in to see your agents"
+              description="One free signature proves the wallet is yours. It is not a transaction."
+              action={
+                <Button variant="primary" onClick={() => session.signIn().catch(() => undefined)}>
+                  Sign in
+                </Button>
+              }
+            />
+          </div>
+        ) : agents.isPending ? (
+          <SkeletonRows rows={3} className="rounded-xl border border-border bg-panel" />
+        ) : agents.isError ? (
+          <div className="rounded-xl bg-short-soft px-4 py-3 text-base text-short">{describeError(agents.error)}</div>
+        ) : (
+          <MyAgents agents={list} demo={demo && !isConnected} />
+        )}
+      </section>
+
+      <div className="grid items-start gap-4 lg:grid-cols-2">
+        <HumanCard owner={owner} stats={human.data ?? null} loading={human.isPending} signedIn={session.signedIn} />
+        <TelegramCard />
       </div>
-    </div>
+    </Container>
   );
 }
 
-function MyAgentsTable({ agents, demo }: { agents: OwnedAgent[]; demo: boolean }) {
+function MyAgents({ agents, demo }: { agents: OwnedAgent[]; demo: boolean }) {
   const toast = useToast();
   const [fundFor, setFundFor] = useState<OwnedAgent | null>(null);
   const [withdrawing, setWithdrawing] = useState<string | null>(null);
@@ -159,91 +191,102 @@ function MyAgentsTable({ agents, demo }: { agents: OwnedAgent[]; demo: boolean }
     }
   };
 
+  if (agents.length === 0) {
+    return (
+      <div className="rounded-xl border border-border bg-panel shadow-[var(--shadow-card)]">
+        <EmptyState
+          icon={<IconBot size={18} />}
+          title="No agents yet"
+          description="Create your first agent in three quick steps. It starts in paper mode, so nothing risks real money."
+          action={
+            <ButtonLink href="/create" variant="primary">
+              Create an agent
+            </ButtonLink>
+          }
+        />
+      </div>
+    );
+  }
+
   return (
     <>
-      <Table bare>
-        <THead>
-          <tr>
-            <TH>Agent</TH>
-            <TH>Status</TH>
-            <TH>Mode</TH>
-            <TH align="right">Allocation</TH>
-            <TH align="right">PnL</TH>
-            <TH>Budget</TH>
-            <TH align="right">Withdrawable</TH>
-            <TH align="right">Actions</TH>
-          </tr>
-        </THead>
-        <tbody>
-          {agents.length === 0 ? (
-            <EmptyRow colSpan={8}>
-              No agents yet. <Link href="/create" className="text-link hover:underline">Create one</Link>.
-            </EmptyRow>
-          ) : null}
-          {agents.map((a) => {
-            const tpl = getTemplate(a.config.template);
-            const pnl = a.stats?.realizedPnlUsd ?? 0;
-            return (
-              <TR key={a.id}>
-                <TD>
-                  <div className="flex items-center gap-2">
-                    <Link href={`/agents/${a.id}`} className="font-medium hover:underline">
+      <ul className="flex flex-col gap-3">
+        {agents.map((a) => {
+          const tpl = getTemplate(a.config.template);
+          const pnl = a.stats?.realizedPnlUsd ?? 0;
+          const noWallet = a.tradingWallet === UNPROVISIONED;
+          return (
+            <li key={a.id} className="rounded-xl border border-border bg-panel p-4 shadow-[var(--shadow-card)] sm:p-5">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="flex min-w-0 flex-col gap-1.5">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Link href={`/agents/${a.id}`} className="text-lg font-semibold tracking-[-0.012em] hover:underline">
                       {a.name}
                     </Link>
+                    <Pill tone={STATUS_TONE[a.status]}>{STATUS_LABEL[a.status]}</Pill>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-1.5">
                     <Badge>{tpl?.name ?? a.config.template}</Badge>
+                    <Badge tone={a.mode === "paper" ? "warn" : "accent"}>{a.mode === "paper" ? "Paper" : "Live"}</Badge>
                   </div>
-                </TD>
-                <TD>
-                  <Pill tone={STATUS_TONE[a.status]}>{a.status}</Pill>
-                </TD>
-                <TD>
-                  <Badge tone={a.mode === "paper" ? "warn" : "accent"}>{a.mode === "paper" ? "Paper" : "Live"}</Badge>
-                </TD>
-                <TD align="right">{fmtUsd(a.allocationUsd)}</TD>
-                <TD align="right" className={pnlClass(pnl)}>
-                  {fmtUsdSigned(pnl)}
-                </TD>
-                <TD>
-                  <Pill tone={TIER_TONE[a.budgetTier]}>{a.budgetTier}</Pill>
-                </TD>
-                <TD align="right">{fmtUsd(a.withdrawableUsd, 2)}</TD>
-                <TD align="right">
-                  <div className="flex justify-end gap-1">
-                    <Button
-                      size="sm"
-                      onClick={() => setFundFor(a)}
-                      disabled={a.tradingWallet === UNPROVISIONED}
-                      title={a.tradingWallet === UNPROVISIONED ? "Trading wallet not provisioned yet" : undefined}
-                    >
-                      Fund
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      disabled={a.status === "stopped" || statusBusy === a.id}
-                      title={a.status === "stopped" ? "Stopped agents cannot be changed" : undefined}
-                      onClick={() => toggleStatus(a)}
-                    >
-                      {statusBusy === a.id ? "Saving…" : a.status === "active" ? "Pause" : a.status === "paused" ? "Resume" : "Stopped"}
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      disabled={a.withdrawableUsd <= 0 || withdrawing === a.id || !CONTRACTS.treasury}
-                      onClick={() => withdraw(a)}
-                      title={CONTRACTS.treasury ? undefined : "Contracts not deployed"}
-                    >
-                      {CONTRACTS.treasury ? (withdrawing === a.id ? "Withdrawing…" : "Withdraw") : "Contracts not deployed"}
-                    </Button>
-                  </div>
-                </TD>
-              </TR>
-            );
-          })}
-        </tbody>
-      </Table>
+                </div>
+                <ButtonLink href={`/agents/${a.id}`} variant="secondary" size="sm">
+                  Open
+                </ButtonLink>
+              </div>
+
+              <dl className="mt-4 grid grid-cols-2 gap-3 rounded-lg bg-panel-2 p-3 sm:grid-cols-4">
+                <Fact label="Profit" value={<span className={pnlClass(pnl)}>{fmtUsdSigned(pnl)}</span>} />
+                <Fact label="Funds" value={fmtUsd(a.allocationUsd)} />
+                <Fact label="AI credit" value={<Pill tone={TIER_TONE[a.budgetTier]}>{TIER_LABEL[a.budgetTier]}</Pill>} />
+                <Fact label="Can withdraw" value={fmtUsd(a.withdrawableUsd, 2)} />
+              </dl>
+
+              <div className="mt-4 flex flex-wrap items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => setFundFor(a)}
+                  disabled={noWallet}
+                  title={noWallet ? "Trading wallet not provisioned yet" : undefined}
+                >
+                  Fund
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={a.status === "stopped" || statusBusy === a.id}
+                  title={a.status === "stopped" ? "Stopped agents cannot be changed" : undefined}
+                  onClick={() => toggleStatus(a)}
+                >
+                  {statusBusy === a.id ? "Saving…" : a.status === "active" ? "Pause" : a.status === "paused" ? "Resume" : "Stopped"}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={a.withdrawableUsd <= 0 || withdrawing === a.id || !CONTRACTS.treasury}
+                  onClick={() => withdraw(a)}
+                  title={CONTRACTS.treasury ? undefined : "Contracts not deployed"}
+                >
+                  {CONTRACTS.treasury ? (withdrawing === a.id ? "Withdrawing…" : "Withdraw") : "Withdraw (contracts not deployed)"}
+                </Button>
+                {noWallet ? <span className="text-xs text-muted">Its trading wallet is still being set up.</span> : null}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
       {fundFor ? <FundModal agent={fundFor} onClose={() => setFundFor(null)} /> : null}
     </>
+  );
+}
+
+function Fact({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="flex flex-col gap-0.5">
+      <dt className="text-xs text-muted">{label}</dt>
+      <dd className="num flex min-h-6 items-center text-base">{value}</dd>
+    </div>
   );
 }
 
@@ -275,9 +318,9 @@ function FundModal({ agent, onClose }: { agent: OwnedAgent; onClose: () => void 
   };
 
   return (
-    <Modal open onClose={onClose} title={`Fund ${agent.name}`} width="max-w-md">
-      <div className="flex flex-col gap-3 text-[12.5px]">
-        <Field label="Amount (USDC)" hint={`Capped at ${fmtUsd(cap, 2)} per agent (MAX_AGENT_ALLOCATION_USD)`}>
+    <Modal open onClose={onClose} title={`Fund ${agent.name}`} description="Send USDC to the agent's trading wallet." width="max-w-md">
+      <div className="flex flex-col gap-4 text-base">
+        <Field label="Amount (USDC)" hint={`Capped at ${fmtUsd(cap, 2)} per agent.`}>
           <Input
             type="number"
             aria-label="Fund amount"
@@ -288,12 +331,12 @@ function FundModal({ agent, onClose }: { agent: OwnedAgent; onClose: () => void 
             onChange={(e) => setAmount(e.target.valueAsNumber)}
           />
         </Field>
-        <div className="num text-[11.5px] text-muted">To {agent.tradingWallet}</div>
+        <div className="num break-all text-xs text-muted">To {agent.tradingWallet}</div>
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={onClose}>
             Cancel
           </Button>
-          <Button variant="long" disabled={!ok || busy} onClick={send}>
+          <Button variant="primary" disabled={!ok || busy} onClick={send}>
             {busy ? "Sending…" : `Send ${fmtUsd(ok ? amount : 0, 2)} USDC`}
           </Button>
         </div>
@@ -337,8 +380,9 @@ function HumanCard({
   return (
     <Panel
       title="Humans board"
+      description="Join to rank your own manual trades next to the AI agents."
       right={
-        <div className="flex items-center gap-2 text-[11.5px] text-muted">
+        <div className="flex items-center gap-2 text-sm text-muted">
           Join
           <Switch
             label="Join Humans board"
@@ -349,32 +393,38 @@ function HumanCard({
         </div>
       }
     >
-      <div className="flex flex-col gap-2 p-3">
+      <div className="flex flex-col gap-3 p-4">
         {loading ? (
           <SkeletonRows rows={3} className="p-0" />
         ) : stats ? (
-          <dl className="num grid grid-cols-2 gap-y-1.5 text-[12px]">
-            <dt className="text-muted">PnL</dt>
+          <dl className="num grid grid-cols-2 gap-y-2 text-sm [&_dt]:font-sans">
+            <dt className="font-sans text-muted">Return</dt>
             <dd className={`text-right ${pnlClass(stats.realizedPnlPct)}`}>
               {fmtPct(stats.realizedPnlPct, 2, true)} · {fmtUsdSigned(stats.realizedPnlUsd)}
             </dd>
-            <dt className="text-muted">Win rate</dt>
+            <dt className="font-sans text-muted">Win rate</dt>
             <dd className="text-right">{fmtBps(stats.winRateBps)}</dd>
-            <dt className="text-muted">Max drawdown</dt>
+            <dt className="font-sans text-muted">Worst dip</dt>
             <dd className="text-right text-short">-{fmtBps(stats.maxDrawdownBps)}</dd>
-            <dt className="text-muted">Trades</dt>
+            <dt className="font-sans text-muted">Trades</dt>
             <dd className="text-right">{fmtNum(stats.trades)}</dd>
-            <dt className="text-muted">Volume</dt>
+            <dt className="font-sans text-muted">Volume</dt>
             <dd className="text-right">{fmtUsd(stats.volumeUsd)}</dd>
           </dl>
         ) : (
-          <div className="text-[12px] text-muted">No manual trades yet for {shortAddr(owner)}. Trade on the Trade page.</div>
+          <p className="text-sm text-muted">
+            No manual trades yet for <span className="num">{shortAddr(owner)}</span>. Make one on the{" "}
+            <Link href="/trade" className="text-accent-fg hover:underline">
+              Trade page
+            </Link>{" "}
+            and it shows up here.
+          </p>
         )}
-        {!signedIn ? <div className="text-[11px] text-muted">Sign in with your wallet to change the opt-in.</div> : null}
+        {!signedIn ? <p className="text-xs text-muted">Sign in with your wallet to change this setting.</p> : null}
         {stats?.verified ? (
-          <Badge tone="link">✓ CRE-verified stats</Badge>
+          <Badge tone="success">Verified stats</Badge>
         ) : (
-          <div className="text-[11px] text-muted">Your stats are attested by CRE once you opt in.</div>
+          <p className="text-xs text-muted">Once you opt in, your stats are independently verified too.</p>
         )}
       </div>
     </Panel>
@@ -383,17 +433,12 @@ function HumanCard({
 
 function TelegramCard() {
   return (
-    <Panel title="Telegram bot">
-      <div className="flex flex-col gap-2 p-3 text-[12px]">
-        <a
-          href={`https://t.me/${TELEGRAM_BOT}`}
-          target="_blank"
-          rel="noreferrer"
-          className="num text-link hover:underline"
-        >
+    <Panel title="Telegram bot" description="Follow agents and get alerts in chat.">
+      <div className="flex flex-col gap-3 p-4 text-sm">
+        <a href={`https://t.me/${TELEGRAM_BOT}`} target="_blank" rel="noreferrer" className="num w-fit text-accent-fg hover:underline">
           t.me/{TELEGRAM_BOT}
         </a>
-        <ul className="num grid grid-cols-2 gap-x-3 gap-y-1 text-[11.5px] text-muted">
+        <ul className="num grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs text-muted">
           <li>/top</li>
           <li>/risk</li>
           <li>/agent &lt;name&gt;</li>
@@ -401,7 +446,7 @@ function TelegramCard() {
           <li>/follow &lt;agent&gt;</li>
           <li>/fork &lt;agent&gt;</li>
         </ul>
-        <div className="text-[11px] text-muted">Owners get full alerts: orders, fills, guardrail blocks, top-ups.</div>
+        <p className="text-xs text-muted">Owners also get alerts for orders, fills, blocked trades and AI top-ups.</p>
       </div>
     </Panel>
   );

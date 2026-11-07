@@ -27,7 +27,7 @@ const toBar = (c: Candle) => ({
 const toVolume = (c: Candle) => ({
   time: Math.floor(c.t / 1000) as UTCTimestamp,
   value: c.v,
-  color: c.c >= c.o ? "rgba(80, 210, 193, 0.35)" : "rgba(237, 112, 128, 0.35)",
+  color: c.c >= c.o ? "rgba(11, 122, 83, 0.28)" : "rgba(196, 43, 69, 0.28)",
 });
 
 interface Series {
@@ -94,20 +94,20 @@ export function PriceChart({
     const chart = createChart(el, {
       autoSize: true,
       layout: {
-        background: { type: ColorType.Solid, color: "#0f1a1e" },
-        textColor: "#8a9a98",
+        background: { type: ColorType.Solid, color: "#ffffff" },
+        textColor: "#62666f",
         fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
         fontSize: 11,
       },
-      grid: { vertLines: { color: "#13222a" }, horzLines: { color: "#13222a" } },
-      rightPriceScale: { borderColor: "#1c2d34" },
-      timeScale: { borderColor: "#1c2d34", timeVisible: true },
+      grid: { vertLines: { color: "#f2f2f4" }, horzLines: { color: "#f2f2f4" } },
+      rightPriceScale: { borderColor: "#e7e7ea" },
+      timeScale: { borderColor: "#e7e7ea", timeVisible: true },
     });
     const candle = chart.addSeries(CandlestickSeries, {
-      upColor: "#50d2c1",
-      downColor: "#ed7088",
-      wickUpColor: "#50d2c1",
-      wickDownColor: "#ed7088",
+      upColor: "#0b7a53",
+      downColor: "#c42b45",
+      wickUpColor: "#0b7a53",
+      wickDownColor: "#c42b45",
       borderVisible: false,
     });
     const volume = chart.addSeries(HistogramSeries, {
@@ -179,5 +179,5 @@ export function PriceChart({
     };
   }, [product]);
 
-  return <div ref={ref} className="h-full min-h-[360px] w-full" />;
+  return <div ref={ref} role="img" aria-label={`${asset} candlestick price chart`} className="h-full min-h-[360px] w-full" />;
 }

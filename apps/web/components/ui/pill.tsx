@@ -4,22 +4,22 @@ import type { ReactNode } from "react";
 export type Tone = "long" | "short" | "warn" | "link" | "muted";
 
 const TONES: Record<Tone, string> = {
-  long: "border-long/40 bg-long/10 text-long",
-  short: "border-short/40 bg-short/10 text-short",
-  warn: "border-warn/40 bg-warn/10 text-warn",
-  link: "border-link/40 bg-link/10 text-link",
-  muted: "border-border bg-panel-2 text-muted",
+  long: "bg-long-soft text-long",
+  short: "bg-short-soft text-short",
+  warn: "bg-warn-soft text-warn",
+  link: "bg-accent-soft text-accent-fg",
+  muted: "bg-panel-2 text-muted",
 };
 
 const DOT: Record<Tone, string> = {
   long: "bg-long",
   short: "bg-short",
   warn: "bg-warn",
-  link: "bg-link",
-  muted: "bg-muted",
+  link: "bg-accent",
+  muted: "bg-subtle",
 };
 
-/** Rounded status chip with a leading dot. Used for risk level, agent status and verdicts. */
+/** Status chip with a leading dot: risk light, agent status, verdicts. Colour is never the only cue (the label says it too). */
 export function Pill({
   tone = "muted",
   dot = true,
@@ -37,12 +37,12 @@ export function Pill({
     <span
       title={title}
       className={clsx(
-        "num inline-flex h-5 items-center gap-1.5 whitespace-nowrap rounded-full border px-2 text-[11px] font-medium",
+        "inline-flex h-6 items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 text-xs font-medium",
         TONES[tone],
         className,
       )}
     >
-      {dot ? <span className={clsx("size-1.5 rounded-full", DOT[tone])} /> : null}
+      {dot ? <span aria-hidden className={clsx("size-1.5 rounded-full", DOT[tone])} /> : null}
       {children}
     </span>
   );

@@ -1,16 +1,18 @@
 import { clsx } from "clsx";
 import type { ReactNode } from "react";
 
-export type BadgeTone = "accent" | "warn" | "neutral" | "link";
+export type BadgeTone = "neutral" | "accent" | "success" | "warn" | "danger" | "link";
 
 const TONES: Record<BadgeTone, string> = {
-  accent: "border-long/40 text-long",
-  warn: "border-warn/50 text-warn",
-  neutral: "border-border text-muted",
-  link: "border-link/40 text-link",
+  neutral: "bg-panel-2 text-muted ring-border",
+  accent: "bg-accent-soft text-accent-fg ring-accent/20",
+  link: "bg-accent-soft text-accent-fg ring-accent/20",
+  success: "bg-long-soft text-long ring-long/20",
+  warn: "bg-warn-soft text-warn ring-warn/25",
+  danger: "bg-short-soft text-short ring-short/20",
 };
 
-/** Small rectangular label, e.g. PAPER, CRE, Self-funded, template name. */
+/** Small rounded label: template name, Paper, Verified, Owner only. Sentence case, never shouting. */
 export function Badge({
   tone = "neutral",
   children,
@@ -23,7 +25,7 @@ export function Badge({
   return (
     <span
       className={clsx(
-        "inline-flex h-4 items-center whitespace-nowrap rounded border px-1 text-[10px] font-medium uppercase tracking-wide",
+        "inline-flex h-5 items-center gap-1 whitespace-nowrap rounded-md px-1.5 text-xs font-medium ring-1 ring-inset",
         TONES[tone],
         className,
       )}

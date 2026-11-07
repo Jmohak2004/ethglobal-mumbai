@@ -44,11 +44,12 @@ export function MarketsList({
 
   return (
     <Panel
-      title={`Markets · ${assets.length}`}
-      className="h-[320px] xl:h-[560px]"
+      title="Markets"
+      description={`${assets.length} to trade`}
+      className="h-[360px] xl:h-[600px]"
       bodyClassName="flex min-h-0 flex-1 flex-col"
     >
-      <div className="border-b border-border p-2">
+      <div className="border-b border-border px-3 pb-3 pt-2">
         <input
           type="search"
           value={query}
@@ -56,10 +57,10 @@ export function MarketsList({
           onKeyDown={onKeyDown}
           placeholder="Search symbol or category"
           aria-label="Search markets"
-          className="h-7 w-full rounded-md border border-border bg-bg px-2 text-[12px] text-text placeholder:text-muted focus:border-border-strong focus:outline-none"
+          className="h-9 w-full rounded-lg border border-border-strong bg-panel px-3 text-base text-text placeholder:text-subtle transition-[border-color,box-shadow] duration-150 focus:border-accent focus:outline-none focus:ring-[3px] focus:ring-accent/20"
         />
       </div>
-      <div className="grid grid-cols-[1fr_84px_64px] gap-2 border-b border-border px-3 py-1 text-[10px] uppercase tracking-wider text-muted">
+      <div className="grid grid-cols-[1fr_84px_64px] gap-2 border-b border-border px-4 py-1.5 text-xs text-muted">
         <span>Market</span>
         <span className="text-right">Last</span>
         <span className="text-right">24h</span>
@@ -71,7 +72,7 @@ export function MarketsList({
           </li>
         ))}
         {rows.length === 0 ? (
-          <li className="px-3 py-6 text-center text-[12px] text-muted">No markets match “{query}”.</li>
+          <li className="px-3 py-8 text-center text-sm text-muted">No markets match “{query}”.</li>
         ) : null}
       </ul>
     </Panel>
@@ -100,13 +101,13 @@ function MarketRow({
       title={product ?? asset}
       onClick={() => onSelect(asset)}
       className={clsx(
-        "grid w-full grid-cols-[1fr_84px_64px] items-center gap-2 px-3 py-1.5 text-left text-[12px] transition-colors",
-        active ? "bg-panel-2" : "hover:bg-panel-2",
+        "grid w-full grid-cols-[1fr_84px_64px] items-center gap-2 px-4 py-2 text-left text-sm transition-colors duration-100",
+        active ? "bg-accent-soft" : "hover:bg-panel-2",
       )}
     >
       <span className="flex min-w-0 items-center gap-1.5">
         <span className="truncate font-medium text-text">{asset}</span>
-        <span className="truncate text-[9.5px] uppercase tracking-wide text-muted">{categoryOf(asset)}</span>
+        <span className="truncate text-xs text-subtle">{categoryOf(asset)}</span>
       </span>
       <span className={`num text-right ${priceClass}`}>{t ? formatPrice(t.price) : "—"}</span>
       <span className={`num text-right ${change === undefined ? "text-muted" : pnlClass(change)}`}>

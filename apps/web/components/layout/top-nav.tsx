@@ -4,63 +4,79 @@ import { clsx } from "clsx";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-import { DemoMenu } from "@/components/layout/demo-menu";
+import { MoreMenu } from "@/components/layout/more-menu";
 import { RiskPill } from "@/components/layout/risk-pill";
-import { SettingsPopover } from "@/components/layout/settings-popover";
 import { WalletButton } from "@/components/layout/wallet-button";
-import { CHAIN } from "@/lib/contracts";
 import type { RiskDisplay } from "@/lib/types";
 
 const LINKS = [
   { href: "/leaderboard", label: "Leaderboard" },
   { href: "/trade", label: "Trade" },
-  { href: "/create", label: "Create Agent" },
+  { href: "/create", label: "Create agent" },
   { href: "/portfolio", label: "Portfolio" },
 ];
+
+export function Logo({ className }: { className?: string }) {
+  return (
+    <span className={clsx("inline-flex items-center gap-2 text-lg font-semibold tracking-[-0.02em] text-text", className)}>
+      <span aria-hidden className="grid size-6 place-items-center rounded-md bg-text text-bg">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <path d="m4 19 8-15 8 15M8 13h8" />
+        </svg>
+      </span>
+      Arena
+    </span>
+  );
+}
 
 export function TopNav({ risk }: { risk: RiskDisplay }) {
   const path = usePathname();
   // Agent pages are reached from the leaderboard, so they keep the Leaderboard tab lit.
   const isActive = (href: string) =>
     href === "/leaderboard" ? path.startsWith("/leaderboard") || path.startsWith("/agents") : path.startsWith(href);
-  return (
-    <header className="sticky top-0 z-40 flex h-12 items-center gap-3 border-b border-border bg-bg px-4 md:gap-6">
-      <Link href="/" className="flex shrink-0 items-center gap-2 text-[13px] font-semibold tracking-[0.2em] text-text">
-        <span className="grid size-5 place-items-center rounded bg-long text-[11px] font-bold text-bg">A</span>
-        ARENA
+
+  const link = (l: (typeof LINKS)[number], mobile: boolean) => {
+    const active = isActive(l.href);
+    return (
+      <Link
+        key={l.href}
+        href={l.href}
+        aria-current={active ? "page" : undefined}
+        className={clsx(
+          "inline-flex shrink-0 items-center rounded-lg font-medium transition-[background-color,color] duration-150 ease-out",
+          mobile ? "h-8 px-3 text-sm" : "h-8 px-3 text-base",
+          active ? "bg-panel-2 text-text" : "text-muted hover:bg-panel-2/70 hover:text-text",
+        )}
+      >
+        {l.label}
       </Link>
+    );
+  };
 
-      <nav className="flex min-w-0 items-center gap-1 overflow-x-auto" aria-label="Main">
-        {LINKS.map((l) => {
-          const active = isActive(l.href);
-          return (
-            <Link
-              key={l.href}
-              href={l.href}
-              aria-current={active ? "page" : undefined}
-              className={clsx(
-                "h-8 rounded-md px-3 text-[12.5px] leading-8 transition-colors",
-                active ? "bg-panel-2 text-text" : "text-muted hover:text-text",
-              )}
-            >
-              {l.label}
-            </Link>
-          );
-        })}
-      </nav>
+  return (
+    <header className="sticky top-0 z-40 border-b border-border bg-bg/85 backdrop-blur-md">
+      <div className="mx-auto flex h-[var(--nav-h)] max-w-[1200px] items-center gap-3 px-4 sm:px-6">
+        <Link href="/" aria-label="Arena home" className="shrink-0 rounded-lg">
+          <Logo />
+        </Link>
 
-      <div className="ml-auto flex shrink-0 items-center gap-3">
-        <DemoMenu />
-        <RiskPill level={risk} />
-        <span
-          title={`Chain from NEXT_PUBLIC_CHAIN: ${CHAIN.name} (chain id ${CHAIN.id})`}
-          className="num hidden h-6 items-center gap-1.5 rounded-md border border-border px-2 text-[11px] text-muted md:flex"
-        >
-          <span className="size-1.5 rounded-full bg-link" />
-          {CHAIN.name}
-        </span>
-        <SettingsPopover />
-        <WalletButton />
+        <nav className="ml-4 hidden items-center gap-0.5 md:flex" aria-label="Main">
+          {LINKS.map((l) => link(l, false))}
+        </nav>
+
+        <div className="ml-auto flex shrink-0 items-center gap-2">
+          <RiskPill level={risk} />
+          <WalletButton className="hidden sm:flex" />
+          <MoreMenu />
+        </div>
+      </div>
+
+      {/* Phones: the same links in a scrollable row, and the wallet button gets its own line. */}
+      <div className="flex items-center gap-2 border-t border-border/60 px-4 py-1.5 md:hidden">
+        <nav className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto" aria-label="Main (mobile)">
+          {LINKS.map((l) => link(l, true))}
+        </nav>
+        <WalletButton size="sm" className="shrink-0 sm:hidden" />
       </div>
     </header>
   );
