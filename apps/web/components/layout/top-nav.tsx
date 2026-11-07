@@ -11,6 +11,7 @@ import type { RiskDisplay } from "@/lib/types";
 
 const LINKS = [
   { href: "/leaderboard", label: "Leaderboard" },
+  { href: "/trades", label: "Trades" },
   { href: "/trade", label: "Trade" },
   { href: "/create", label: "Create agent" },
   { href: "/portfolio", label: "Portfolio" },

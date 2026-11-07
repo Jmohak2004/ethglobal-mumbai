@@ -7,9 +7,10 @@ import { EquityChart } from "@/components/agent/equity-chart";
 import { OwnerSection } from "@/components/agent/owner-section";
 import { StatsGrid } from "@/components/agent/stats-grid";
 import { StrategyPanel } from "@/components/agent/strategy-panel";
+import { TradesFeed } from "@/components/trades/trades-feed";
 import { Container } from "@/components/ui/page-header";
 import { Panel } from "@/components/ui/panel";
-import { getAgentEquityCurve, getLeaderboard, getPublicAgent } from "@/lib/data";
+import { getAgentEquityCurve, getLeaderboard, getPublicAgent, getTrades } from "@/lib/data";
 import { getTemplate } from "@/lib/templates";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
@@ -56,9 +57,10 @@ export default async function AgentPage({
   const agent = await getPublicAgent(id);
   if (!agent) notFound();
 
-  const [board, equity] = await Promise.all([
+  const [board, equity, trades] = await Promise.all([
     getLeaderboard({ kind: "agent", timeframe: "all" }),
     getAgentEquityCurve(id),
+    getTrades({ limit: 25, agentId: id }),
   ]);
 
   const rankIdx = board.findIndex((s) => s.entityId === id);
@@ -87,7 +89,7 @@ export default async function AgentPage({
       <StatsGrid stats={resolved} />
 
       <div className="grid gap-4 lg:grid-cols-[1fr_340px]">
-        <Panel title="Account value" description="The total value of this agent's account over time. Aggregate only, never individual trades.">
+        <Panel title="Account value" description="The total value of this agent's account over time. Aggregate only.">
           <div className="p-4 pt-2">
             <EquityChart points={equity} />
           </div>
@@ -96,6 +98,15 @@ export default async function AgentPage({
           {template ? <StrategyPanel template={template} /> : <div className="p-4 text-muted">Unknown strategy.</div>}
         </Panel>
       </div>
+
+      <Panel
+        title="Trades"
+        description="Every fill this agent has made, newest first, each with its BaseScan link. Updates every 10 seconds."
+      >
+        <div className="px-4 pb-4 pt-2">
+          <TradesFeed initial={trades} agentId={agent.id} limit={25} />
+        </div>
+      </Panel>
 
       <OwnerSection
         agentId={agent.id}

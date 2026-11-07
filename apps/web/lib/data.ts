@@ -18,7 +18,7 @@ import { dbContext, type Db, type Repo } from "@/lib/server/db";
 import { agentOrderTxs, agentTrades, equitySeries } from "@/lib/server/equity";
 import { readTreasuryAccount } from "@/lib/server/chain";
 import { ApiError } from "@/lib/server/errors";
-import { shortAddr } from "@/lib/format";
+import { journalTxUrl, liveTxUrl, shortAddr } from "@/lib/format";
 import { round4, tierFor } from "@/lib/treasury-math";
 import * as mock from "@/lib/mock-data";
 import { TEMPLATES, type TemplateDef } from "@/lib/templates";
@@ -34,6 +34,8 @@ import type {
   PublicAgent,
   RiskStatus,
   TopUp,
+  TradeRow,
+  TradesPage,
   TradingActivity,
   ZgBudget,
 } from "@/lib/types";
@@ -298,6 +300,45 @@ export async function getHumanStats(address: string): Promise<PerformanceStats |
   const me = address.toLowerCase();
   const rows = await ctx.r.leaderboard(ctx.db, { kind: "human", limit: 500 });
   return rows.find((row) => row.entityId.toLowerCase() === me) ?? null;
+}
+
+/**
+ * Public feed of every fill (agents and humans), newest first, with a BaseScan link per fill. `cursor` is the
+ * `nextCursor` of the previous page ("<ts>:<fillId>"). Without a database there are no fills.
+ */
+export async function getTrades(opts: { limit?: number; agentId?: string; cursor?: string } = {}): Promise<TradesPage> {
+  const empty: TradesPage = { trades: [], summary: { trades: 0, volumeUsd: 0, journaled: 0 }, nextCursor: null };
+  const ctx = await dbContext();
+  if (!ctx) return empty;
+  const limit = Math.min(Math.max(1, Math.floor(opts.limit ?? 100)), 200);
+  let before: { ts: number; id: string } | undefined;
+  if (opts.cursor) {
+    const i = opts.cursor.indexOf(":");
+    const ts = Number(opts.cursor.slice(0, i));
+    if (i < 1 || !Number.isFinite(ts)) throw new ApiError(422, "VALIDATION", "cursor is invalid");
+    before = { ts, id: opts.cursor.slice(i + 1) };
+  }
+  const [rows, summary] = await Promise.all([
+    ctx.r.listRecentFills(ctx.db, { limit: limit + 1, agentId: opts.agentId, before }),
+    ctx.r.fillsSummary(ctx.db, { agentId: opts.agentId }),
+  ]);
+  const page = rows.slice(0, limit);
+  const trades: TradeRow[] = page.map((f) => ({
+    id: f.id,
+    ts: f.ts,
+    trader: f.agentId
+      ? { kind: "agent", name: f.agentName ?? shortAddr(f.agentId), agentId: f.agentId }
+      : { kind: "human", name: f.humanName ?? shortAddr(f.funderAddress, 6, 4), agentId: null },
+    side: f.side,
+    asset: f.asset,
+    sizeUsd: f.notionalUsd,
+    priceUsd: f.price,
+    mode: f.paper ? "paper" : "live",
+    txId: f.txId,
+    explorerUrl: f.txId ? (f.paper ? journalTxUrl(f.txId) : liveTxUrl(f.txId)) : null,
+  }));
+  const last = page[page.length - 1];
+  return { trades, summary, nextCursor: rows.length > limit && last ? `${last.ts}:${last.id}` : null };
 }
 
 export async function getTemplates(): Promise<TemplateDef[]> {

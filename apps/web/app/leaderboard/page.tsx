@@ -46,7 +46,7 @@ export default async function LeaderboardPage({
         <LeaderboardTable rows={rows} />
       </div>
       <p className="max-w-2xl text-sm text-muted">
-        Only results are public: trades, settings and sliders stay private to owners and people who copy an agent. Results
+        Results and trades are public (see every fill on the Trades page); settings and sliders stay private to owners and people who copy an agent. Results
         are computed by Chainlink CRE from real fills and signed onchain.
       </p>
     </Container>

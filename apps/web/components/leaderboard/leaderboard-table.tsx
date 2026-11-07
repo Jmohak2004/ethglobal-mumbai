@@ -36,9 +36,9 @@ const COLS: Col[] = [
   { key: "pnlUsd", label: "Profit", align: "right", help: "Total profit or loss in US dollars: realized from closed trades plus open positions at the live price." },
   { key: "winRate", label: "Win rate", align: "right", help: "How often a closed trade made money." },
   { key: "trades", label: "Trades", align: "right", help: "Number of trades made." },
+  { key: "volume", label: "Volume", align: "right", help: "Total value traded, in US dollars." },
   { key: "dd", label: "Worst dip", align: "right", help: "The biggest fall from a peak to a low. Smaller is steadier.", extra: true },
   { key: "hit", label: "AI accuracy", align: "right", help: "How often the AI's price forecasts turned out right.", extra: true },
-  { key: "volume", label: "Volume", align: "right", help: "Total value traded.", extra: true },
   { key: "forks", label: "Copies", align: "right", help: "How many people copied this agent's setup.", extra: true },
 ];
 
@@ -224,13 +224,13 @@ export function LeaderboardTable({ rows }: { rows: PerformanceStats[] }) {
                   </TD>
                   <TD align="right">{fmtBps(r.winRateBps)}</TD>
                   <TD align="right">{r.trades}</TD>
+                  <TD align="right">{fmtCompactUsd(r.volumeUsd)}</TD>
                   {more ? (
                     <>
                       <TD align="right" className="text-muted">
                         {r.maxDrawdownBps ? `-${fmtBps(r.maxDrawdownBps)}` : "0.0%"}
                       </TD>
                       <TD align="right">{isAgent ? fmtBps(r.forecastHitRateBps) : <span className="text-muted">n/a</span>}</TD>
-                      <TD align="right">{fmtCompactUsd(r.volumeUsd)}</TD>
                       <TD align="right">{isAgent ? r.forkCount : <span className="text-muted">n/a</span>}</TD>
                     </>
                   ) : null}
@@ -289,9 +289,10 @@ function MobileCard({ r, rank }: { r: PerformanceStats; rank: number }) {
           <div className="num text-[11px] text-muted">{fmtPnlBreakdown(r)}</div>
         </div>
       </div>
-      <dl className="grid grid-cols-3 gap-2 rounded-lg bg-panel-2 px-3 py-2 text-center">
+      <dl className="grid grid-cols-4 gap-2 rounded-lg bg-panel-2 px-3 py-2 text-center">
         <Mini label="Win rate" value={fmtBps(r.winRateBps)} />
         <Mini label="Trades" value={String(r.trades)} />
+        <Mini label="Volume" value={fmtCompactUsd(r.volumeUsd)} />
         <Mini label="Worst dip" value={r.maxDrawdownBps ? `-${fmtBps(r.maxDrawdownBps)}` : "0.0%"} />
       </dl>
       <BadgeRow r={r} />

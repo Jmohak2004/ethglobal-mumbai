@@ -114,6 +114,8 @@ Install the secret-scanning pre-commit hook (requires `gitleaks`): `git config c
 
 `EXECUTION_MODE` is `paper` by default. Paper mode never submits an order and never returns signing payloads. Agent ticks still fetch real Flash quotes and real 0G decisions, so every decision and quote is real, but no funds move.
 
+The worker journals every paper fill onchain through the TradeJournal contract on Base Sepolia, and live fills carry their Base settlement transaction. Every trade is listed at `/trades` with its BaseScan link.
+
 An order is submitted only when all of these hold:
 
 - `EXECUTION_MODE=live`

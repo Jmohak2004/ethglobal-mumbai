@@ -396,3 +396,39 @@ export interface ForkResult {
   sourceAgentId: string;
   txHash: `0x${string}`;
 }
+
+/** One fill in the public trades feed (GET /api/trades). */
+export interface TradeRow {
+  /** Fill id. */
+  id: string;
+  ts: number;
+  trader: {
+    kind: "agent" | "human";
+    /** Agent name, an opted-in human's display name, or a short address. */
+    name: string;
+    /** Set for agents: /agents/<id>. */
+    agentId: string | null;
+  };
+  side: "buy" | "sell";
+  asset: string;
+  sizeUsd: number;
+  priceUsd: number;
+  mode: "paper" | "live";
+  /** Paper: the TradeJournal tx on Base Sepolia. Live: the Flash settlement tx on Base mainnet. Null while journaling. */
+  txId: string | null;
+  /** BaseScan link for txId (sepolia for paper, mainnet for live). Null while txId is null. */
+  explorerUrl: string | null;
+}
+
+export interface TradesSummary {
+  trades: number;
+  volumeUsd: number;
+  journaled: number;
+}
+
+export interface TradesPage {
+  trades: TradeRow[];
+  summary: TradesSummary;
+  /** Pass back as ?cursor= for the next (older) page. Null at the end. */
+  nextCursor: string | null;
+}

@@ -41,6 +41,27 @@ export interface PaperFillInput {
   ts?: number;
 }
 
+/** Mirrors @arena/db RecentFill (repo/orders.ts). `id` is the fill id. */
+export interface RecentFillRow {
+  id: string;
+  orderId: string;
+  price: number;
+  qty: number;
+  notionalUsd: number;
+  feeUsd: number;
+  integratorFeeUsd: number;
+  txId: string | null;
+  ts: number;
+  asset: string;
+  side: "buy" | "sell";
+  orderType: FlashOrderType;
+  funderAddress: string;
+  agentId: string | null;
+  agentName: string | null;
+  humanName: string | null;
+  paper: boolean;
+}
+
 /** Mirrors @arena/db PaperFillRecord. `id` is the fill id. */
 export interface PaperFillRow {
   id: string;
@@ -150,6 +171,12 @@ export interface Repo {
   insertPaperFill(db: Db, input: PaperFillInput): Promise<{ orderId: string; fillId: string }>;
   listPaperFillsByFunder(db: Db, funderAddress: string, limit?: number): Promise<PaperFillRow[]>;
   cancelPaperOrders(db: Db, funderAddress: string, orderIds: string[], now?: number): Promise<string[]>;
+  // Public trades feed (repo/orders.ts)
+  listRecentFills(
+    db: Db,
+    opts?: { limit?: number; agentId?: string; before?: { ts: number; id: string } },
+  ): Promise<RecentFillRow[]>;
+  fillsSummary(db: Db, opts?: { agentId?: string }): Promise<{ trades: number; volumeUsd: number; journaled: number }>;
 }
 
 let repoPromise: Promise<Repo> | undefined;
