@@ -38,6 +38,13 @@ export const BASE_TOKENS: Record<string, TokenInfo> = {
   KAITO: { symbol: "KAITO", address: "0x98d0baa52b2D063E780DE12F615f963Fe8537553", decimals: 18, usdFeed: null },
   EURC: { symbol: "EURC", address: "0x60a3E35Cc302bFA44Cb288Bc5a4F316Fdb1adb42", decimals: 6, usdFeed: null },
   cbLTC: { symbol: "cbLTC", address: "0xcb17C9Db87B595717C857a08468793f5bAb6445F", decimals: 8, usdFeed: null },
+  CLANKER: { symbol: "CLANKER", address: "0x1bc0c42215582d5A085795f4baDbaC3ff36d1Bcb", decimals: 18, usdFeed: null },
+  PROMPT: { symbol: "PROMPT", address: "0x30c7235866872213F68cb1F08c37Cb9eCCB93452", decimals: 18, usdFeed: null },
+  KEYCAT: { symbol: "KEYCAT", address: "0x9a26F5433671751C3276a065f57e5a02D2817973", decimals: 18, usdFeed: null },
+  COOKIE: { symbol: "COOKIE", address: "0xC0041EF357B183448B235a8Ea73Ce4E4eC8c265F", decimals: 18, usdFeed: null },
+  B3: { symbol: "B3", address: "0xB3B32F9f8827D4634fE7d973Fa1034Ec9fdDB3B3", decimals: 18, usdFeed: null },
+  BNKR: { symbol: "BNKR", address: "0x22aF33FE49fD1Fa80c7149773dDe5890D3c76F3b", decimals: 18, usdFeed: null },
+  AVNT: { symbol: "AVNT", address: "0x696F9436B67233384889472Cd7cD58A6fB5DF4f1", decimals: 18, usdFeed: null },
 };
 
 /**
@@ -65,6 +72,13 @@ export const COINBASE_PRODUCTS: Record<string, string> = {
   KAITO: "KAITO-USD",
   EURC: "EURC-USD",
   cbLTC: "LTC-USD",
+  CLANKER: "CLANKER-USD",
+  PROMPT: "PROMPT-USD",
+  KEYCAT: "KEYCAT-USD",
+  COOKIE: "COOKIE-USD",
+  B3: "B3-USD",
+  BNKR: "BNKR-USD",
+  AVNT: "AVNT-USD",
 };
 
 /** Base Sepolia: development target for contracts and CRE simulations. */

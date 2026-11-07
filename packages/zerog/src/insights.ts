@@ -65,6 +65,13 @@ const ASSET_NAMES: Record<string, string> = {
   TOSHI: "Toshi (TOSHI)",
   WELL: "Moonwell (WELL)",
   ZORA: "Zora (ZORA)",
+  CLANKER: "Clanker (CLANKER)",
+  PROMPT: "Wayfinder (PROMPT)",
+  KEYCAT: "Keyboard Cat (KEYCAT)",
+  COOKIE: "Cookie DAO (COOKIE)",
+  B3: "B3 (B3)",
+  BNKR: "Bankr (BNKR)",
+  AVNT: "Avantis (AVNT)",
 };
 
 /**
