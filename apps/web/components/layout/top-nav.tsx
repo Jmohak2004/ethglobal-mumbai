@@ -67,7 +67,9 @@ export function TopNav({ risk }: { risk: RiskDisplay }) {
 
         <div className="ml-auto flex shrink-0 items-center gap-2">
           <RiskPill level={risk} />
-          <WalletButton className="hidden sm:flex" />
+          <div className="hidden sm:block">
+            <WalletButton />
+          </div>
           <MoreMenu />
         </div>
       </div>
@@ -77,7 +79,9 @@ export function TopNav({ risk }: { risk: RiskDisplay }) {
         <nav className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto" aria-label="Main (mobile)">
           {LINKS.map((l) => link(l, true))}
         </nav>
-        <WalletButton size="sm" className="shrink-0 sm:hidden" />
+        <div className="shrink-0 sm:hidden">
+          <WalletButton size="sm" />
+        </div>
       </div>
     </header>
   );

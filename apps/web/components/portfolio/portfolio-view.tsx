@@ -68,7 +68,7 @@ export function PortfolioView() {
     return (
       <Container className="py-8 md:py-10">
         <PageHeader title="Portfolio" description="Your agents, their earnings, and your place on the Humans board." />
-        <div className="mt-8 rounded-xl border border-border bg-panel shadow-[var(--shadow-card)]">
+        <div className="mt-6 rounded-xl border border-border bg-panel shadow-[var(--shadow-card)]">
           <EmptyState
             icon={<IconWallet size={18} />}
             title="Connect a wallet to get started"
@@ -92,7 +92,7 @@ export function PortfolioView() {
   const totalWithdrawable = list.reduce((sum, a) => sum + a.withdrawableUsd, 0);
 
   return (
-    <Container className="flex flex-col gap-8 py-8 md:py-10">
+    <Container className="flex flex-col gap-6 py-8 md:py-10">
       <PageHeader
         title="Portfolio"
         description={

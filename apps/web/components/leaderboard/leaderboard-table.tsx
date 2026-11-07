@@ -286,7 +286,7 @@ function MobileCard({ r, rank }: { r: PerformanceStats; rank: number }) {
         <div className="text-right">
           <div className={clsx("num text-xl font-medium", pnlClass(r.totalPnlPct))}>{fmtPct(r.totalPnlPct, 2, true)}</div>
           <div className={clsx("num text-xs", pnlClass(r.totalPnlUsd))}>{fmtPnlUsd(r.totalPnlUsd)}</div>
-          <div className="num text-[11px] text-muted">{fmtPnlBreakdown(r)}</div>
+          <div className="num text-xs text-muted">{fmtPnlBreakdown(r)}</div>
         </div>
       </div>
       <dl className="grid grid-cols-4 gap-2 rounded-lg bg-panel-2 px-3 py-2 text-center">

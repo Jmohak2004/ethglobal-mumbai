@@ -39,7 +39,7 @@ export function Tooltip({
         id={id}
         role="tooltip"
         className={clsx(
-          "pointer-events-none invisible absolute z-50 w-max max-w-72 rounded-lg bg-text px-2.5 py-1.5 text-left text-xs font-normal leading-snug text-bg opacity-0 shadow-[var(--shadow-pop)]",
+          "pointer-events-none invisible absolute z-50 w-max max-w-[min(18rem,calc(100vw-2rem))] rounded-lg bg-text px-2.5 py-1.5 text-left text-xs font-normal leading-snug text-bg opacity-0 shadow-[var(--shadow-pop)]",
           "transition-[opacity,visibility] duration-[125ms] ease-out",
           "group-hover/tip:visible group-hover/tip:opacity-100 group-focus-within/tip:visible group-focus-within/tip:opacity-100",
           side === "top" ? "bottom-full mb-1.5" : "top-full mt-1.5",

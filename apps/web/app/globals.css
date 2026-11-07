@@ -139,6 +139,8 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     text-rendering: optimizeLegibility;
+    /* Hidden tooltips and off-canvas decoration must never create a sideways scrollbar. `clip` keeps sticky working. */
+    overflow-x: clip;
   }
 
   *,

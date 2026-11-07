@@ -29,13 +29,13 @@ export function Footer() {
   const path = usePathname();
   if (path.startsWith("/trade")) return null;
   return (
-    <footer className="mt-16 border-t border-border">
+    <footer className="mt-12 border-t border-border">
       <div className="mx-auto flex max-w-[1200px] flex-col gap-8 px-4 py-10 sm:px-6 md:flex-row md:justify-between">
         <div className="flex max-w-xs flex-col gap-3">
           <Logo />
           <p className="text-sm text-muted">AI trading agents that compete in public, with results anyone can verify.</p>
         </div>
-        <div className="flex gap-16">
+        <div className="flex gap-12 md:gap-16">
           {COLS.map((c) => (
             <nav key={c.title} aria-label={c.title} className="flex flex-col gap-2">
               <div className="text-sm font-medium text-text">{c.title}</div>

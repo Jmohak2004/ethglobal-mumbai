@@ -54,7 +54,7 @@ export function SummaryPanel({
     <div className="flex flex-col gap-4">
       <dl className="divide-y divide-border rounded-xl border border-border bg-panel">
         {rows.map(([k, v]) => (
-          <div key={k} className="grid grid-cols-[9rem_1fr] gap-x-4 px-4 py-2.5 text-sm">
+          <div key={k} className="grid grid-cols-[9rem_minmax(0,1fr)] gap-x-4 px-4 py-2.5 text-sm">
             <dt className="text-muted">{k}</dt>
             <dd className="min-w-0 break-words text-text">{v}</dd>
           </div>

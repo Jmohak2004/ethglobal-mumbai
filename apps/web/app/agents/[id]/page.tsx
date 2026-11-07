@@ -88,7 +88,7 @@ export default async function AgentPage({
 
       <StatsGrid stats={resolved} />
 
-      <div className="grid gap-4 lg:grid-cols-[1fr_340px]">
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
         <Panel title="Account value" description="The total value of this agent's account over time. Aggregate only.">
           <div className="p-4 pt-2">
             <EquityChart points={equity} />

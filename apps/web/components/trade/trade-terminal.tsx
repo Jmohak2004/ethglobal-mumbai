@@ -82,7 +82,7 @@ export function TradeTerminal({ assets, products, feeds, initial, activity }: Pr
   };
 
   return (
-    <Container wide className="flex flex-col gap-4 py-5">
+    <Container full className="flex flex-col gap-4 py-5 md:py-6">
       <AssetHeader
         asset={asset}
         product={product ?? asset}

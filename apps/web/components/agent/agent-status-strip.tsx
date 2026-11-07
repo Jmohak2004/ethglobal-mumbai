@@ -66,7 +66,7 @@ export function AgentStatusStrip({ agentId, demo, status }: { agentId: string; d
       aria-label="Agent status"
       className="flex flex-col gap-4 rounded-xl border border-border bg-panel p-4 shadow-[var(--shadow-card)] sm:p-5"
     >
-      <div className="grid gap-4 md:grid-cols-[1.4fr_1fr_1fr]">
+      <div className="grid gap-4 md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)]">
         <Item label="Last decision">
           {v.lastTickAt !== null ? (
             <div className="flex flex-col gap-1">

@@ -164,7 +164,7 @@ export function AiChartRead({
             <span className="text-sm font-medium">Indicator read</span>
             <Badge>no AI</Badge>
           </div>
-          <dl className="num grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-sm [&_dt]:font-sans">
+          <dl className="num grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1.5 text-sm [&_dt]:font-sans">
             <dt className="text-muted">Trend</dt>
             <dd>{trend}</dd>
             <dt className="text-muted">Momentum (ROC)</dt>

@@ -50,7 +50,7 @@ export function Safety() {
       title="Small by design, paper first"
       lede="The limits are code that an agent cannot talk its way past."
     >
-      <div className="grid gap-4 lg:grid-cols-[1.5fr_1fr]">
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
         <Card>
           <ul className="grid sm:grid-cols-2">
             {POINTS.map((p) => (

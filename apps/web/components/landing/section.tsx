@@ -24,7 +24,7 @@ export function LandingSection({
 }) {
   const titleId = `${id}-title`;
   return (
-    <section id={id} aria-labelledby={titleId} className={clsx("py-14 md:py-20", className)}>
+    <section id={id} aria-labelledby={titleId} className={clsx("py-12 md:py-16", className)}>
       <Container>
         <header className="mb-8 flex max-w-2xl flex-col gap-2 md:mb-10">
           {eyebrow ? <p className="text-sm font-medium text-accent-fg">{eyebrow}</p> : null}

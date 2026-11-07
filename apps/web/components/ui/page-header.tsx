@@ -1,20 +1,22 @@
 import { clsx } from "clsx";
 import type { ReactNode } from "react";
 
-/** Page width and padding. One container for every page so edges line up with the nav. */
+/** Page width and padding. Every page except narrow forms shares the nav's 1200px so edges line up. `wide` is kept as an alias. */
 export function Container({
   children,
   className,
-  wide,
   narrow,
+  full,
 }: {
   children: ReactNode;
   className?: string;
   wide?: boolean;
   narrow?: boolean;
+  /** App-like surfaces (the trade terminal) that need more than the 1200px reading width. */
+  full?: boolean;
 }) {
   return (
-    <div className={clsx("mx-auto w-full px-4 sm:px-6", wide ? "max-w-[1200px]" : narrow ? "max-w-[860px]" : "max-w-[1080px]", className)}>
+    <div className={clsx("mx-auto w-full px-4 sm:px-6", narrow ? "max-w-[860px]" : full ? "max-w-[1440px]" : "max-w-[1200px]", className)}>
       {children}
     </div>
   );
