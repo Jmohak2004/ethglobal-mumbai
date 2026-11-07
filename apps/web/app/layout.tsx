@@ -3,6 +3,7 @@ import { Geist_Mono, Inter } from "next/font/google";
 import type { ReactNode } from "react";
 
 import { Footer } from "@/components/layout/footer";
+import { TickerStrip } from "@/components/layout/ticker-strip";
 import { TopNav } from "@/components/layout/top-nav";
 import { getRisk } from "@/lib/data";
 import { softRead } from "@/lib/server/soft";
@@ -35,6 +36,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
         </a>
         <Providers>
           <TopNav risk={risk} />
+          <TickerStrip />
           <main id="main" className="min-h-[calc(100dvh-var(--nav-h))]">
             {children}
           </main>

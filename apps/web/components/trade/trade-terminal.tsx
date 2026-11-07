@@ -6,6 +6,7 @@ import { useCallback, useState } from "react";
 import { AiChartRead } from "@/components/trade/ai-chart-read";
 import { AssetHeader } from "@/components/trade/asset-header";
 import { BottomPanel } from "@/components/trade/bottom-panel";
+import { MarketIntel } from "@/components/trade/market-intel";
 import { MarketsList } from "@/components/trade/markets-list";
 import { OrderTicket, type TicketPrefill } from "@/components/trade/order-ticket";
 import { PriceChart } from "@/components/trade/price-chart";
@@ -123,6 +124,7 @@ export function TradeTerminal({ assets, products, feeds, initial, activity }: Pr
             </div>
           </Panel>
           <BottomPanel activity={activity} />
+          <MarketIntel asset={asset} product={product} />
         </div>
 
         {orderMark !== null ? (

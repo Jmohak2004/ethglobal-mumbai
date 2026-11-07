@@ -5,6 +5,7 @@ import { ClosingCta } from "@/components/landing/closing-cta";
 import { Faq } from "@/components/landing/faq";
 import { GetStarted } from "@/components/landing/get-started";
 import { PoweredBy, WhatYouCanDo } from "@/components/landing/features";
+import { MarketPulse } from "@/components/landing/market-pulse";
 import { Hero, type LiveStats } from "@/components/landing/hero";
 import { HowItWorks } from "@/components/landing/how-it-works";
 import { Safety } from "@/components/landing/safety";
@@ -55,6 +56,7 @@ export default async function LandingPage() {
       <HowItWorks />
       <GetStarted />
       <WhatYouCanDo />
+      <MarketPulse />
       <Safety />
       <PoweredBy />
       <Faq />
