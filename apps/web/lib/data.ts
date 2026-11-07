@@ -315,7 +315,11 @@ export interface NewAgent {
   forkedFrom?: string | null;
 }
 
-/** Creates a paused, unfunded agent. Input must already be validated by @arena/policy. */
+/**
+ * Creates an agent. Paper agents start active (they need no funds, so they start deciding as soon as the
+ * worker provisions a wallet); live agents start paused until the owner funds them and resumes.
+ * Input must already be validated by @arena/policy.
+ */
 export async function createAgent(input: NewAgent): Promise<{ id: string }> {
   const ctx = await dbContext();
   if (!ctx) return mock.mockCreateAgent(input);
@@ -328,7 +332,7 @@ export async function createAgent(input: NewAgent): Promise<{ id: string }> {
     config: input.config,
     configHash: input.configHash,
     mode: input.mode,
-    status: "paused",
+    status: input.mode === "paper" ? "active" : "paused",
     forkedFrom: input.forkedFrom ?? null,
   });
   return { id: agent.id };
